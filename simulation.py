@@ -7,7 +7,7 @@ import sys
 import sumolib
 import traci
 
-from src.policy import BasePolicy, MaxSpeedPolicy
+from src.policy import BasePolicy, FixedSpeedPolicy
 from src.metrics import MeanEdgeFuelConsumption, MeanEdgeTime
 
 
@@ -17,13 +17,14 @@ P_VEHICLE = 0.3
 P_CONNECTED = 0.2
 MIN_SPEED = 45
 MAX_SPEED = 60
+
 STEP_LENGTH = 1
 EDGE_IDS = ["E1"]
-TRAFFIC_LIGTS = None
+TRAFFIC_LIGTS = ["J2"]
 VEHICLETYPE_IDS = ["ordinary", "connected"]
 RANDOM_SEED = 42
 SUMO_SEED = 42
-USE_GUI = False
+USE_GUI = True
 
 if "SUMO_HOME" in os.environ:
     tools = os.path.join(os.environ["SUMO_HOME"], "tools")
@@ -35,7 +36,8 @@ else:
 def runSimulation(
     configPath: str = CONFIG_PATH,
     simTime: int = SIM_TIME,
-    policyListner: Optional[BasePolicy] = MaxSpeedPolicy,
+    policyListner: BasePolicy = BasePolicy,
+    policyOptions: dict = {},
     pVehicle: float = P_VEHICLE,
     pConnected: float = P_CONNECTED,
     minSpeed: float = MIN_SPEED,
@@ -70,6 +72,7 @@ def runSimulation(
         policyListner = policyListner(
             edgeIDs=edgeIDs,
             trafficlightIDs=trafficlightIDs,
+            **policyOptions,
         )
 
     metricsListners = []
@@ -113,7 +116,10 @@ def runSimulation(
 
 if __name__ == "__main__":
 
-    metricsListners = runSimulation()
+    metricsListners = runSimulation(
+        policyListner=FixedSpeedPolicy,
+        policyOptions={'speed': 30}
+    )
 
     for metricListner in metricsListners:
         print(metricListner)

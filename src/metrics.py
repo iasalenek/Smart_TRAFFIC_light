@@ -27,8 +27,10 @@ class EdgeMetric(StepListener):
             self.vehicletypeIDs = traci.vehicletype.getIDList()
         # Dict-ы с неаггрегированными и аггрегированными значениями по типам автомобилей
         self._nonAggregatedValues = {vehicletype: [] for vehicletype in vehicletypeIDs}
-        self._nonAggregatedValues['All'] = []
-        self.aggregatedValues = {vehicletype: None for vehicletype in self._nonAggregatedValues.keys()}
+        self._nonAggregatedValues["All"] = []
+        self.aggregatedValues = {
+            vehicletype: None for vehicletype in self._nonAggregatedValues.keys()
+        }
 
     def cleanUp(self):
         self.aggregatedValues = {
@@ -37,9 +39,9 @@ class EdgeMetric(StepListener):
         }
 
     def __repr__(self) -> str:
-        repr = f'{self.metricName}:\n'
+        repr = f"{self.metricName}:\n"
         for vehicletype, value in self.aggregatedValues.items():
-            repr += f'{vehicletype[:10]:<10} --- {value:>10.4f}\n'
+            repr += f"{vehicletype[:10]:<10} --- {value:>10.4f}\n"
         return repr
 
 
@@ -51,7 +53,7 @@ class MeanEdgeTime(EdgeMetric):
         **kwargs,
     ) -> None:
         super(MeanEdgeTime, self).__init__(edgeID, vehicletypeIDs, **kwargs)
-        self.metricName = f'Mean Time for Edge {self.edgeID}'
+        self.metricName = f"Mean Time for Edge {self.edgeID}"
         self._vehicleIdTimeDict = dict()
         self._vehicleIdTypeDict = dict()
         traci.edge.subscribe(self.edgeID, varIDs=[tc.LAST_STEP_VEHICLE_ID_LIST])
@@ -86,7 +88,7 @@ class MeanEdgeFuelConsumption(EdgeMetric):
         **kwargs,
     ) -> None:
         super(MeanEdgeFuelConsumption, self).__init__(edgeID, vehicletypeIDs, **kwargs)
-        self.metricName = f'Mean Fuel Consumption for Edge {self.edgeID}'
+        self.metricName = f"Mean Fuel Consumption for Edge {self.edgeID}"
         self._vehicleIdFuelDict = dict()
         self._vehicleIdTypeDict = dict()
         self.stepLength = traci.simulation.getDeltaT()
