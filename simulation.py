@@ -5,6 +5,7 @@ import os
 import random
 import sys
 
+import numpy as np
 import torch
 import torch.nn as nn
 import sumolib
@@ -82,7 +83,7 @@ def runSimulation(
                 # second column on max result is index of where max element was
                 # found, so we pick action with the larger expected reward.
                 # return policy_net(state).max(1).indices.view(1, 1) //TODO
-                return torch.argmax(policy_net(state))
+                return torch.argmax(policy_net(torch.from_numpy(state)))
 
         else:
             return torch.tensor([[env.action_space.sample()]], device=device, dtype=torch.float32)
@@ -100,17 +101,25 @@ def runSimulation(
         # (a final state would've been the one after which simulation ended)
         non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
                                                 batch.next_state)), device=device, dtype=torch.bool)
-        non_final_next_states = torch.cat([torch.from_numpy(s) for s in batch.next_state
-                                           if s is not None])
 
-        state_batch = torch.cat(batch.state)
-        action_batch = torch.cat(batch.action)
-        reward_batch = torch.cat(batch.reward)
+        #TODO
+        non_final_next_states = torch.tensor(np.array(batch.next_state))
 
+        state_batch = torch.tensor(np.array(batch.state))
+        # print(state_batch.shape)
+        # print(tuple(torch.tensor(arr) for arr in batch.action))
+        # action_batch = torch.cat(tuple(torch.tensor(arr).reshape(1) for arr in batch.action))
+        action_batch = torch.tensor(tuple(arr.reshape(1).to(torch.int64) for arr in batch.action))
+
+        # reward_batch = torch.cat(tuple(torch.tensor(arr) for arr in batch.reward))
+        # reward_batch = np.concatenate(batch.reward)
+        reward_batch = torch.tensor(batch.reward)
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
         # for each batch state according to policy_net
-        state_action_values = policy_net(state_batch).gather(1, action_batch)
+        # print(state_batch.shape, torch.unsqueeze(action_batch, 1).shape)
+        # print(state_batch.shape)
+        state_action_values = policy_net(state_batch).gather(1, torch.unsqueeze(action_batch, 1))
 
         # Compute V(s_{t+1}) for all next states.
         # Expected values of actions for non_final_next_states are computed based
@@ -159,7 +168,9 @@ def runSimulation(
     if torch.cuda.is_available():
         num_episodes = 600
     else:
-        num_episodes = 50
+        num_episodes = 10
+
+
 
     for _ in range(num_episodes):
 
@@ -210,13 +221,10 @@ def runSimulation(
                 target_net_state_dict[key] = policy_net_state_dict[key] * TAU + target_net_state_dict[key] * (1 - TAU)
             target_net.load_state_dict(target_net_state_dict)
 
-        traci.close()
+        # traci.close()
         metrics = metricsListners
-
+    traci.close()
     return metrics
-
-
-
 
 
 if __name__ == "__main__":
@@ -236,8 +244,6 @@ if __name__ == "__main__":
     EPS_DECAY = 1000
     TAU = 0.005
     LR = 1e-4
-
-
 
     metricsListners = runSimulation()
 

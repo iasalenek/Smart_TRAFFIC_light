@@ -22,8 +22,6 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
 
-
-
 class SumoEnv(gym.Env):
     def __init__(self, edge_id, n_traffic_lights):
         traci.edge.subscribe(edge_id, varIDs=[tc.LAST_STEP_VEHICLE_ID_LIST])
@@ -55,8 +53,7 @@ class SumoEnv(gym.Env):
         )
         queued = np.array([1 if traci.vehicle.getSpeed(car_id) < 0.1 else 0 for car_id in stepVehicleIDs])
         capacity = traci.lane.getLength(self.edgeID + "_0") / 1000.
-        return sum(queued)/capacity
-
+        return sum(queued) / capacity
 
     def get_waiting(self):
         stepVehicleIDs = set(
@@ -76,9 +73,8 @@ class SumoEnv(gym.Env):
         #acting
         for vehicleID in stepVehicleIDs:
             if traci.vehicle.getTypeID(vehicleID) == "connected":
-
-
                 traci.vehicle.setSpeed(vehicleID, speed=(self.actions[int(action)] / 3.6))
+                # print("Set speed is:", self.actions[int(action)])
                 # traci.vehicle.setSpeed(vehicleID, speed=60 / 3.6)
         # next_obs
         num = traci.edge.getLastStepVehicleNumber(self.edgeID)
@@ -89,10 +85,10 @@ class SumoEnv(gym.Env):
         phases = [traci.trafficlight.getPhase(light) for light in traci.trafficlight.getIDList()]
         next_obs = np.array([density, queue, fuel_cons] + phases)
         waiting_time = self.get_waiting()
-        reward = (1-self.waiting_cons_coef)*(waiting_time-self.last_waiting) - self.waiting_cons_coef * fuel_cons
+        reward = (1 - self.waiting_cons_coef) * (waiting_time - self.last_waiting) - self.waiting_cons_coef * fuel_cons
         self.last_waiting = waiting_time
         done = self.steps < self.bound_steps
-        self.steps+=1
+        self.steps += 1
         return next_obs, reward, done, {}
         pass
 
@@ -111,16 +107,10 @@ class DQN(nn.Module):
     # Called with either one element to determine next action, or a batch
     # during optimization. Returns tensor([[left0exp,right0exp]...]).
     def forward(self, x):
-        x = x.astype(np.float32)
-        x = F.relu(self.layer1(torch.from_numpy(x)))
+        x = x.to(torch.float32)
+        x = F.relu(self.layer1(x))
         x = F.relu(self.layer2(x))
         return self.layer3(x)
-
-
-
-
-
-
 
 
 class ReplayMemory(object):
@@ -137,9 +127,6 @@ class ReplayMemory(object):
 
     def __len__(self):
         return len(self.memory)
-
-
-
 
 
 class BasePolicy(StepListener):

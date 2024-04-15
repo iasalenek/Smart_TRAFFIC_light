@@ -10,4 +10,4 @@ TRAFFIC_LIGTS = None
 VEHICLETYPE_IDS = ["ordinary", "connected"]
 RANDOM_SEED = 42
 SUMO_SEED = 42
-USE_GUI = True
+USE_GUI = False
