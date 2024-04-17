@@ -16,19 +16,6 @@ from src.policy import (BasePolicy, MaxSpeedPolicy, device,
 from src.metrics import MeanEdgeFuelConsumption, MeanEdgeTime
 import torch.optim as optim
 
-# CONFIG_PATH = "nets/single_agent/500m/config.sumocfg"
-# SIM_TIME = 1 * 60 * 60
-# P_VEHICLE = 0.3
-# P_CONNECTED = 0.2
-# MIN_SPEED = 45
-# MAX_SPEED = 60
-# STEP_LENGTH = 1
-# EDGE_IDS = ["E1"]
-# TRAFFIC_LIGTS = None
-# VEHICLETYPE_IDS = ["ordinary", "connected"]
-# RANDOM_SEED = 42
-# SUMO_SEED = 42
-# USE_GUI = True
 from src.constants import *
 
 if "SUMO_HOME" in os.environ:
@@ -71,7 +58,7 @@ def runSimulation(
 
     traci.start(sumoCmd)
 
-    def select_action(state):
+    def select_action(state):  # state is actually a tuple of many states
         global steps_done
         sample = random.random()
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \
@@ -150,17 +137,18 @@ def runSimulation(
         )
 
     metrics = []
-    env = SumoEnv(EDGE_IDS[0], 2)
+    env = SumoEnv()
 
     # Get number of actions from gym action space
     n_actions = env.action_dim  # TODO
     # Get the number of state observations
     # state, info = env.reset()
     state, info = env.reset()  # TODO
-    n_observations = len(state)
+    n_observations = env.obs_dim
     policy_net = DQN(n_observations, n_actions).to(device)
     target_net = DQN(n_observations, n_actions).to(device)
     target_net.load_state_dict(policy_net.state_dict())
+    traci.setLegacyGetLeader(False)
 
     optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
     memory = ReplayMemory(10000)
@@ -170,9 +158,7 @@ def runSimulation(
     else:
         num_episodes = 10
 
-
-
-    for _ in range(num_episodes):
+    for k in range(num_episodes):
 
         metricsListners = []
         for edgeID in edgeIDs:
@@ -209,10 +195,18 @@ def runSimulation(
                 veh_id += 1
 
             traci.simulationStep()
-            action = select_action(state)
-            next_state, reward, done, _ = env.step(action.item())
-            reward = torch.tensor([reward], device=device)
-            memory.push(state, action, next_state, reward)
+
+            action = dict()
+            for car_id, obs in state.items():
+                action[car_id] = select_action(obs)
+
+            next_state, reward, done, _ = env.step(action)
+            for car_id, obs in state.items():
+                if car_id in next_state:
+                    rew = torch.tensor([reward[car_id]], device=device)
+                    memory.push(obs, action[car_id], next_state[car_id], rew)
+
+            # reward = torch.tensor([reward], device=device)
             state = next_state
             optimize_model()
             target_net_state_dict = target_net.state_dict()
@@ -220,8 +214,8 @@ def runSimulation(
             for key in policy_net_state_dict:
                 target_net_state_dict[key] = policy_net_state_dict[key] * TAU + target_net_state_dict[key] * (1 - TAU)
             target_net.load_state_dict(target_net_state_dict)
+        print(f"Episode {k} is finished!")
 
-        # traci.close()
         metrics = metricsListners
     traci.close()
     return metrics

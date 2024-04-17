@@ -12,7 +12,6 @@ from gymnasium.core import ActType, RenderFrame
 from gymnasium.spaces import Box, Discrete
 from numpy import ndarray, dtype
 from traci import StepListener
-from traci import constants as tc
 
 from src.constants import *
 
@@ -23,74 +22,71 @@ Transition = namedtuple('Transition',
 
 
 class SumoEnv(gym.Env):
-    def __init__(self, edge_id, n_traffic_lights):
-        traci.edge.subscribe(edge_id, varIDs=[tc.LAST_STEP_VEHICLE_ID_LIST])
+    def __init__(self):
+
         self.bound_steps = SIM_TIME // STEP_LENGTH
         self.steps = 0
-        self.last_waiting = 0
-        self.waiting_cons_coef = 0.7
         self.max_speed = MAX_SPEED
         self.min_speed = MIN_SPEED
-        # self.action_space = Box(low=self.min_speed, high=self.max_speed, dtype=np.float32)
         self.action_dim = 8  # split max/min speed in 8 parts
         self.actions = np.linspace(self.min_speed, self.max_speed, self.action_dim)
         self.action_space = Discrete(len(self.actions))
-        self.edgeID = edge_id
-        #density + queue + fuel_cons + cur_phases_for_all_lights
+        self.n_traffic_lights = len(TRAFFIC_LIGTS)
+        self.car_cur_edge = dict()
+        self.stepLength = traci.simulation.getDeltaT()
+        #phase for the nearest light, its time before the next phase, distance, distance for the nearest car.
+        #I want to count accelerated fuel consumption on a current edge as a reward. (with a '-')
 
-        self.obs_dim = 3 + n_traffic_lights
+        self.obs_dim = 4
         obs_low = np.zeros((self.obs_dim,))
-        obs_high = np.array([1, 1, np.inf] + [4 for _ in range(n_traffic_lights)])
+        self.INFTY = 100000
+        obs_high = np.array([4, 100000, 100000, 100000])
         self.observation_space = Box(low=obs_low, high=obs_high)
 
     def reset(self, **kwargs):
-        null_obs = np.zeros((self.obs_dim,))
-        return null_obs, {}
-
-    def compute_queue(self):
-        stepVehicleIDs = set(
-            traci.edge.getSubscriptionResults(self.edgeID)[tc.LAST_STEP_VEHICLE_ID_LIST]
-        )
-        queued = np.array([1 if traci.vehicle.getSpeed(car_id) < 0.1 else 0 for car_id in stepVehicleIDs])
-        capacity = traci.lane.getLength(self.edgeID + "_0") / 1000.
-        return sum(queued) / capacity
-
-    def get_waiting(self):
-        stepVehicleIDs = set(
-            traci.edge.getSubscriptionResults(self.edgeID)[tc.LAST_STEP_VEHICLE_ID_LIST]
-        )
-        acc = 0.0
-        for ids in stepVehicleIDs:
-            acc += traci.vehicle.getAccumulatedWaitingTime(ids)
-        return acc
+        return {}, {}
 
     def step(
             self, action: ActType
-    ) -> tuple[ndarray[Any, dtype[Any]], float | Any, bool | Any, dict[Any, Any]]:
-        stepVehicleIDs = set(
-            traci.edge.getSubscriptionResults(self.edgeID)[tc.LAST_STEP_VEHICLE_ID_LIST]
-        )
-        #acting
-        for vehicleID in stepVehicleIDs:
-            if traci.vehicle.getTypeID(vehicleID) == "connected":
-                traci.vehicle.setSpeed(vehicleID, speed=(self.actions[int(action)] / 3.6))
-                # print("Set speed is:", self.actions[int(action)])
-                # traci.vehicle.setSpeed(vehicleID, speed=60 / 3.6)
-        # next_obs
-        num = traci.edge.getLastStepVehicleNumber(self.edgeID)
-        density = num / traci.lane.getLength(self.edgeID + "_0") / 1000
+    ) -> tuple[dict[Any, ndarray[Any, dtype[Any]]], dict[Any, Any], bool | Any, dict[Any, Any]]:
 
-        fuel_cons = traci.edge.getFuelConsumption(self.edgeID)
-        queue = self.compute_queue()
-        phases = [traci.trafficlight.getPhase(light) for light in traci.trafficlight.getIDList()]
-        next_obs = np.array([density, queue, fuel_cons] + phases)
-        waiting_time = self.get_waiting()
-        reward = (1 - self.waiting_cons_coef) * (waiting_time - self.last_waiting) - self.waiting_cons_coef * fuel_cons
-        self.last_waiting = waiting_time
+        vehicleIDs = traci.vehicle.getIDList()
+        vehicleIDs = list(filter(lambda x: traci.vehicle.getTypeID(x) == "connected", vehicleIDs))
+        # acting
+        for vehicleID, speed_index in action.items():
+            if vehicleID in vehicleIDs:
+                traci.vehicle.setSpeed(vehicleID, speed=(self.actions[int(speed_index)] / 3.6))
+                # print("Set speed is: ", self.actions[int(speed_index)])
+        # next_obs
+        next_obs = dict()
+        reward = dict()
+        next_car_edge = dict()
+
+        for car_id in vehicleIDs:
+            TLS_list = traci.vehicle.getNextTLS(car_id)
+            TLS_list = sorted(TLS_list, key=lambda x: x[2])
+            if TLS_list:
+                nearestTLS = TLS_list[0]
+                tlsID, tlsIndex, dist, state = nearestTLS
+                phase = traci.trafficlight.getPhase(tlsID)
+                remaining_time = traci.trafficlight.getNextSwitch(tlsID)
+            else:
+                phase = 0
+                remaining_time = self.INFTY
+                dist = self.INFTY
+
+            leader_id, leader_dist = traci.vehicle.getLeader(car_id)
+            if leader_id == "":
+                leader_dist = self.INFTY
+            next_obs[car_id] = np.array([phase, remaining_time, dist, leader_dist])
+            real_edge = traci.vehicle.getLaneID(car_id)
+            next_car_edge[car_id] = (real_edge, self.car_cur_edge.get(car_id, ("", 0))[1] +
+                                     self.stepLength * traci.vehicle.getFuelConsumption(car_id))
+            reward[car_id] = next_car_edge[car_id][1]
+        self.car_cur_edge = next_car_edge
         done = self.steps < self.bound_steps
         self.steps += 1
         return next_obs, reward, done, {}
-        pass
 
     def render(self) -> RenderFrame | list[RenderFrame] | None:
         pass
