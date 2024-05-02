@@ -10,6 +10,9 @@ import torch
 import torch.nn as nn
 import sumolib
 import traci
+import matplotlib.pyplot as plt
+
+loss_values = []
 
 from src.policy import (BasePolicy, MaxSpeedPolicy, device,
                         SumoEnv, DQN, ReplayMemory, Transition)
@@ -59,25 +62,29 @@ def runSimulation(
     traci.start(sumoCmd)
 
     def select_action(state):  # state is actually a tuple of many states
-        global steps_done
         sample = random.random()
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \
                         math.exp(-1. * steps_done / EPS_DECAY)
-        steps_done += 1
         if sample > eps_threshold:
             with torch.no_grad():
                 # t.max(1) will return the largest column value of each row.
                 # second column on max result is index of where max element was
                 # found, so we pick action with the larger expected reward.
                 # return policy_net(state).max(1).indices.view(1, 1) //TODO
+                # print(policy_net(torch.from_numpy(state)).max(-1).indices.item() == torch.argmax(policy_net(torch.from_numpy(state))))
                 return torch.argmax(policy_net(torch.from_numpy(state)))
 
         else:
-            return torch.tensor([[env.action_space.sample()]], device=device, dtype=torch.float32)
+            return torch.tensor([[envs[0].action_space.sample()]], device=device, dtype=torch.float32)
 
     def optimize_model():
+        global last_optimization
         if len(memory) < BATCH_SIZE:
             return
+        if last_optimization < OPTIMIZATION_FREQUENCY:
+            last_optimization += 1
+            return
+        last_optimization = 0
         transitions = memory.sample(BATCH_SIZE)
         # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
         # detailed explanation). This converts batch-array of Transitions
@@ -122,7 +129,8 @@ def runSimulation(
         # Compute Huber loss
         criterion = nn.SmoothL1Loss()
         loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
-
+        loss_values.append(loss.item())
+        # print(loss.item())
         # Optimize the model
         optimizer.zero_grad()
         loss.backward()
@@ -137,14 +145,16 @@ def runSimulation(
         )
 
     metrics = []
-    env = SumoEnv()
+    envs = []
+    for edge in edgeIDs:
+        envs.append(SumoEnv(edgeID=edge))
 
     # Get number of actions from gym action space
-    n_actions = env.action_dim  # TODO
+    n_actions = envs[0].action_dim  # TODO
     # Get the number of state observations
     # state, info = env.reset()
-    state, info = env.reset()  # TODO
-    n_observations = env.obs_dim
+    # state, info = envs[0].reset()  # TODO
+    n_observations = envs[0].obs_dim
     policy_net = DQN(n_observations, n_actions).to(device)
     target_net = DQN(n_observations, n_actions).to(device)
     target_net.load_state_dict(policy_net.state_dict())
@@ -156,10 +166,10 @@ def runSimulation(
     if torch.cuda.is_available():
         num_episodes = 600
     else:
-        num_episodes = 10
+        num_episodes = 7
 
     for k in range(num_episodes):
-
+        steps_done = 0
         metricsListners = []
         for edgeID in edgeIDs:
             metricsListners += [
@@ -173,8 +183,10 @@ def runSimulation(
 
         veh_id = 0
         random.seed(randomSeed)
-
-        state, info = env.reset()
+        state = []
+        for i in range(len(envs)):
+            st, _ = envs[i].reset()
+            state.append(st)
 
         for _ in range(simTime // STEP_LENGTH):
 
@@ -194,31 +206,39 @@ def runSimulation(
                 )
                 veh_id += 1
 
-            traci.simulationStep()
+            stepVehicles = traci.vehicle.getIDList()
+            for k in range(len(envs)):
+                action = dict()
 
-            action = dict()
-            for car_id, obs in state.items():
-                action[car_id] = select_action(obs)
+                for car_id, obs in state[k].items():
+                    action[car_id] = select_action(obs)
 
-            next_state, reward, done, _ = env.step(action)
-            for car_id, obs in state.items():
-                if car_id in next_state:
-                    rew = torch.tensor([reward[car_id]], device=device)
-                    memory.push(obs, action[car_id], next_state[car_id], rew)
+                next_state, reward, done, _ = envs[k].step(action)
+                for car_id, obs in state[k].items():
+                    if car_id in next_state:
+                        rew = torch.tensor([reward], device=device)
+                        memory.push(obs, action[car_id], next_state[car_id], rew)
+                    elif car_id not in stepVehicles:
+                        memory.push(obs, action[car_id], None, None)
 
-            # reward = torch.tensor([reward], device=device)
-            state = next_state
+                # reward = torch.tensor([reward], device=device)
+                state[k] = next_state
+
             optimize_model()
             target_net_state_dict = target_net.state_dict()
             policy_net_state_dict = policy_net.state_dict()
             for key in policy_net_state_dict:
                 target_net_state_dict[key] = policy_net_state_dict[key] * TAU + target_net_state_dict[key] * (1 - TAU)
             target_net.load_state_dict(target_net_state_dict)
+
+            traci.simulationStep()
+            steps_done += 1
+
         print(f"Episode {k} is finished!")
 
         metrics = metricsListners
     traci.close()
-    return metrics
+    return metrics, list(policy_net.parameters())
 
 
 if __name__ == "__main__":
@@ -231,6 +251,7 @@ if __name__ == "__main__":
     # TAU is the update rate of the target network
     # LR is the learning rate of the ``AdamW`` optimizer
     steps_done = 0
+    last_optimization = 1000
     BATCH_SIZE = 128
     GAMMA = 0.99
     EPS_START = 0.9
@@ -239,7 +260,13 @@ if __name__ == "__main__":
     TAU = 0.005
     LR = 1e-4
 
-    metricsListners = runSimulation()
+    metricsListners, weights = runSimulation()
 
     for metricListner in metricsListners:
         print(metricListner)
+    plt.plot(loss_values)
+    weights_file = open("weights.txt", 'w')
+    weights_file.write(str(weights))
+    plt.show()
+
+
