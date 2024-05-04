@@ -129,7 +129,7 @@ def runSimulation(
         # Compute Huber loss
         criterion = nn.SmoothL1Loss()
         loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
-        loss_values.append(loss.item())
+        # loss_values.append(loss.item())
         # print(loss.item())
         # Optimize the model
         optimizer.zero_grad()
@@ -166,10 +166,11 @@ def runSimulation(
     if torch.cuda.is_available():
         num_episodes = 600
     else:
-        num_episodes = 7
+        num_episodes = 15
 
     for k in range(num_episodes):
         steps_done = 0
+        reward_sum = 0
         metricsListners = []
         for edgeID in edgeIDs:
             metricsListners += [
@@ -213,13 +214,15 @@ def runSimulation(
                 for car_id, obs in state[k].items():
                     action[car_id] = select_action(obs)
 
-                next_state, reward, done, _ = envs[k].step(action)
-                for car_id, obs in state[k].items():
-                    if car_id in next_state:
-                        rew = torch.tensor([reward], device=device)
-                        memory.push(obs, action[car_id], next_state[car_id], rew)
-                    elif car_id not in stepVehicles:
-                        memory.push(obs, action[car_id], None, None)
+                next_state, reward, done, did_action = envs[k].step(action)
+                reward_sum += reward
+                if did_action:
+                    for car_id, obs in state[k].items():
+                        if car_id in next_state:
+                            rew = torch.tensor([reward], device=device)
+                            memory.push(obs, action[car_id], next_state[car_id], rew)
+                        elif car_id not in stepVehicles:
+                            memory.push(obs, action[car_id], None, None)
 
                 # reward = torch.tensor([reward], device=device)
                 state[k] = next_state
@@ -235,7 +238,7 @@ def runSimulation(
             steps_done += 1
 
         print(f"Episode {k} is finished!")
-
+        loss_values.append(reward_sum / (simTime // STEP_LENGTH))
         metrics = metricsListners
     traci.close()
     return metrics, list(policy_net.parameters())
@@ -251,7 +254,7 @@ if __name__ == "__main__":
     # TAU is the update rate of the target network
     # LR is the learning rate of the ``AdamW`` optimizer
     steps_done = 0
-    last_optimization = 1000
+    last_optimization = 10
     BATCH_SIZE = 128
     GAMMA = 0.99
     EPS_START = 0.9
@@ -267,6 +270,7 @@ if __name__ == "__main__":
     plt.plot(loss_values)
     weights_file = open("weights.txt", 'w')
     weights_file.write(str(weights))
+    weights_file.close()
     plt.show()
 
 

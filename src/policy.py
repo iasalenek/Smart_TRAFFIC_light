@@ -42,8 +42,8 @@ class SumoEnv(gym.Env):
         self.actions = np.linspace(self.min_speed, self.max_speed, self.action_dim)
         self.action_space = Discrete(len(self.actions))
         self.n_traffic_lights = len(TRAFFIC_LIGTS)
-        self.car_rewards = dict()
-
+        # self.car_rewards = dict()
+        self.reward = 0
         self.stepLength = traci.simulation.getDeltaT()
         traci.edge.subscribe(self.edgeID, varIDs=[tc.LAST_STEP_VEHICLE_ID_LIST])
         #color_state for the nearest light ohe hot encoded, its time before the next color_state, distance, distance for the nearest car
@@ -69,17 +69,18 @@ class SumoEnv(gym.Env):
         # )
         vehicleIDs = traci.edge.getLastStepVehicleIDs(self.edgeID)
         vehicleIDs = list(filter(lambda x: traci.vehicle.getTypeID(x) == "connected", vehicleIDs))
+        did_action = False
         # acting
-        if self.steps * self.stepLength >= 5:
-            self.steps = 0
-            for vehicleID, speed_index in action.items():
-                if vehicleID in vehicleIDs:
-                    traci.vehicle.setSpeed(vehicleID, speed=(self.actions[int(speed_index)] / 3.6))
-                    # print("Set speed is: ", self.actions[int(speed_index)])
+        # if self.steps * self.stepLength >= 5:
+        did_action = True
+        for vehicleID, speed_index in action.items():
+            if vehicleID in vehicleIDs:
+                traci.vehicle.setSpeed(vehicleID, speed=(self.actions[int(speed_index)] / 3.6))
+                # print("Set speed is: ", self.actions[int(speed_index)])
         # next_obs
         next_obs = dict()
         reward = 0
-        next_car_rewards = dict()
+        # next_car_rewards = dict()
         done = dict()
         is_light = False
         is_leading_car = True
@@ -113,13 +114,14 @@ class SumoEnv(gym.Env):
                 is_leading_car = False
                 leader_dist = 0
             next_obs[car_id] = np.array(color_state + [remaining_time, dist, leader_dist, is_light, is_leading_car])
-            next_car_rewards[car_id] = (self.car_rewards.get(car_id, 0) +
-                                        self.stepLength * traci.vehicle.getFuelConsumption(car_id))
-            reward += -next_car_rewards[car_id]
-        self.car_rewards = next_car_rewards
+            # next_car_rewards[car_id] = (self.car_rewards.get(car_id, 0) +
+            #                             self.stepLength * traci.vehicle.getFuelConsumption(car_id))
+            # reward += -next_car_rewards[car_id]
+        reward = -traci.edge.getFuelConsumption(self.edgeID)
+        # self.car_rewards = next_car_rewards
         done = False
         self.steps += 1
-        return next_obs, reward, done, {}
+        return next_obs, reward, done, did_action
 
     def render(self) -> RenderFrame | list[RenderFrame] | None:
         pass
