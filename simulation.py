@@ -7,15 +7,14 @@ import sys
 import sumolib
 import traci
 
-from src.policy import BasePolicy, FixedSpeedPolicy
+from src.policy import BasePolicy, FixedSpeedPolicy, MyPolicy
 from src.metrics import MeanEdgeFuelConsumption, MeanEdgeTime
-
 
 CONFIG_PATH = "nets/single_agent/500m/config.sumocfg"
 SIM_TIME = 1 * 60 * 60
 P_VEHICLE = 0.3
 P_CONNECTED = 0.2
-MIN_SPEED = 45
+MIN_SPEED = 30
 MAX_SPEED = 60
 
 STEP_LENGTH = 1
@@ -34,23 +33,22 @@ else:
 
 
 def runSimulation(
-    configPath: str = CONFIG_PATH,
-    simTime: int = SIM_TIME,
-    policyListner: BasePolicy = BasePolicy,
-    policyOptions: dict = {},
-    pVehicle: float = P_VEHICLE,
-    pConnected: float = P_CONNECTED,
-    minSpeed: float = MIN_SPEED,
-    maxSpeed: float = MAX_SPEED,
-    stepLength: float = STEP_LENGTH,
-    edgeIDs: List[str] = EDGE_IDS,
-    trafficlightIDs: Optional[List[str]] = None,
-    vehicletypeIDs: Optional[List[str]] = VEHICLETYPE_IDS,
-    randomSeed: int = RANDOM_SEED,
-    sumoSeed: int = SUMO_SEED,
-    useGUI: bool = USE_GUI,
+        configPath: str = CONFIG_PATH,
+        simTime: int = SIM_TIME,
+        policyListner: BasePolicy = BasePolicy,
+        policyOptions: dict = {},
+        pVehicle: float = P_VEHICLE,
+        pConnected: float = P_CONNECTED,
+        minSpeed: float = MIN_SPEED,
+        maxSpeed: float = MAX_SPEED,
+        stepLength: float = STEP_LENGTH,
+        edgeIDs: List[str] = EDGE_IDS,
+        trafficlightIDs: Optional[List[str]] = TRAFFIC_LIGTS,
+        vehicletypeIDs: Optional[List[str]] = VEHICLETYPE_IDS,
+        randomSeed: int = RANDOM_SEED,
+        sumoSeed: int = SUMO_SEED,
+        useGUI: bool = USE_GUI,
 ):
-
     if useGUI:
         sumoBinary = sumolib.checkBinary("sumo-gui")
     else:
@@ -68,19 +66,20 @@ def runSimulation(
 
     traci.start(sumoCmd)
 
-    if policyListner is not None:
-        policyListner = policyListner(
-            edgeIDs=edgeIDs,
-            trafficlightIDs=trafficlightIDs,
-            **policyOptions,
-        )
-
     metricsListners = []
     for edgeID in edgeIDs:
         metricsListners += [
             MeanEdgeTime(edgeID=edgeID, vehicletypeIDs=vehicletypeIDs),
             MeanEdgeFuelConsumption(edgeID=edgeID, vehicletypeIDs=vehicletypeIDs),
         ]
+
+    if policyListner is not None:
+        policyListner = policyListner(
+            edge_ids=edgeIDs,
+            tf_ids=trafficlightIDs,
+            fuel_metric=metricsListners[1],
+            **policyOptions,
+        )
 
     traci.addStepListener(policyListner)
     for metricListner in metricsListners:
@@ -116,9 +115,13 @@ def runSimulation(
 
 if __name__ == "__main__":
 
+    net = sumolib.net.readNet('./nets/single_agent/500m/net.xml')
+
     metricsListners = runSimulation(
-        policyListner=FixedSpeedPolicy,
-        policyOptions={'speed': 30}
+        policyListner=MyPolicy,
+        # policyListner=FixedSpeedPolicy,
+        policyOptions={'net': net, 'step_length': STEP_LENGTH},
+        # policyOptions={'speed': 30},
     )
 
     for metricListner in metricsListners:
