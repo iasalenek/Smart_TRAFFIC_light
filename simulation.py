@@ -164,7 +164,7 @@ def runSimulation(
     if torch.cuda.is_available():
         num_episodes = 600
     else:
-        num_episodes = 5
+        num_episodes = 10
 
     # seeds = [x + 1 if x % 2 == 0 else randomSeed for x in range(2 * num_episodes)]
     seeds = [randomSeed] * num_episodes

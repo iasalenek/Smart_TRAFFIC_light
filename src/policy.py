@@ -117,7 +117,8 @@ class SumoEnv(gym.Env):
             # next_car_rewards[car_id] = (self.car_rewards.get(car_id, 0) +
             #                             self.stepLength * traci.vehicle.getFuelConsumption(car_id))
             # reward += -next_car_rewards[car_id]
-            reward[car_id] = -traci.vehicle.getFuelConsumption(car_id) * self.stepLength
+            # reward[car_id] = -traci.vehicle.getFuelConsumption(car_id) * self.stepLength
+            reward[car_id] = -traci.edge.getFuelConsumption(self.edgeID)
 
         # self.car_rewards = next_car_rewards
         done = False
