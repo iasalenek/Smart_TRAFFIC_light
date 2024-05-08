@@ -59,8 +59,6 @@ def runSimulation(
         "--time-to-teleport", "-1",  # Телепортация автомобилей отключена
     ]
 
-    traci.start(sumoCmd)
-
     def select_action(state):  # state is actually a tuple of many states
         sample = random.random()
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \
@@ -138,12 +136,12 @@ def runSimulation(
         torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
         optimizer.step()
 
-    if policyListner is not None:
-        policyListner = policyListner(
-            edgeIDs=edgeIDs,
-            trafficlightIDs=trafficlightIDs,
-        )
-
+    # if policyListner is not None:
+    #     policyListner = policyListner(
+    #         edgeIDs=edgeIDs,
+    #         trafficlightIDs=trafficlightIDs,
+    #     )
+    traci.start(sumoCmd)
     metrics = []
     envs = []
     for edge in edgeIDs:
@@ -166,9 +164,16 @@ def runSimulation(
     if torch.cuda.is_available():
         num_episodes = 600
     else:
-        num_episodes = 15
+        num_episodes = 5
 
-    for k in range(num_episodes):
+    # seeds = [x + 1 if x % 2 == 0 else randomSeed for x in range(2 * num_episodes)]
+    seeds = [randomSeed] * num_episodes
+    # print(seeds)
+    traci.close()  # needed to start traci for constants initialization
+
+    for ind in range(num_episodes):
+
+        traci.start(sumoCmd)
         steps_done = 0
         reward_sum = 0
         metricsListners = []
@@ -183,7 +188,7 @@ def runSimulation(
             traci.addStepListener(metricListner)
 
         veh_id = 0
-        random.seed(randomSeed)
+        random.seed(seeds[ind])
         state = []
         for i in range(len(envs)):
             st, _ = envs[i].reset()
@@ -214,15 +219,14 @@ def runSimulation(
                 for car_id, obs in state[k].items():
                     action[car_id] = select_action(obs)
 
-                next_state, reward, done, did_action = envs[k].step(action)
-                reward_sum += reward
-                if did_action:
-                    for car_id, obs in state[k].items():
-                        if car_id in next_state:
-                            rew = torch.tensor([reward], device=device)
-                            memory.push(obs, action[car_id], next_state[car_id], rew)
-                        elif car_id not in stepVehicles:
-                            memory.push(obs, action[car_id], None, None)
+                next_state, reward, done, _ = envs[k].step(action)
+                reward_sum += np.sum(np.array(list(reward.values())))
+                for car_id, obs in state[k].items():
+                    if car_id in next_state:
+                        rew = torch.tensor([reward[car_id]], device=device)
+                        memory.push(obs, action[car_id], next_state[car_id], rew)
+                    elif car_id not in stepVehicles:
+                        memory.push(obs, action[car_id], None, None)
 
                 # reward = torch.tensor([reward], device=device)
                 state[k] = next_state
@@ -237,10 +241,13 @@ def runSimulation(
             traci.simulationStep()
             steps_done += 1
 
-        print(f"Episode {k} is finished!")
+        print(f"Episode {ind} is finished!")
+        # if ind % 2 == 1:
         loss_values.append(reward_sum / (simTime // STEP_LENGTH))
-        metrics = metricsListners
-    traci.close()
+        metrics.append( metricsListners)
+
+        traci.close()
+
     return metrics, list(policy_net.parameters())
 
 
@@ -263,14 +270,13 @@ if __name__ == "__main__":
     TAU = 0.005
     LR = 1e-4
 
-    metricsListners, weights = runSimulation()
-
-    for metricListner in metricsListners:
-        print(metricListner)
+    metrics, weights = runSimulation()
+    # _, weights = runSimulation()
+    for epoch in metrics:
+        for metricListner in epoch:
+            print(metricListner)
     plt.plot(loss_values)
     weights_file = open("weights.txt", 'w')
     weights_file.write(str(weights))
     weights_file.close()
     plt.show()
-
-

@@ -61,7 +61,7 @@ class SumoEnv(gym.Env):
 
     def step(
             self, action: ActType
-    ) -> tuple[dict[Any, ndarray[Any, dtype[Any]]], int, bool, set[Any] | Any]:
+    ) -> tuple[dict[Any, ndarray[Any, dtype[Any]]], dict[Any, Any], bool, dict[Any, Any]]:
 
         # vehicleIDs = traci.vehicle.getIDList()
         # vehicleIDs = set(
@@ -72,14 +72,14 @@ class SumoEnv(gym.Env):
         did_action = False
         # acting
         # if self.steps * self.stepLength >= 5:
-        did_action = True
+
         for vehicleID, speed_index in action.items():
             if vehicleID in vehicleIDs:
                 traci.vehicle.setSpeed(vehicleID, speed=(self.actions[int(speed_index)] / 3.6))
                 # print("Set speed is: ", self.actions[int(speed_index)])
         # next_obs
         next_obs = dict()
-        reward = 0
+        reward = dict()
         # next_car_rewards = dict()
         done = dict()
         is_light = False
@@ -117,11 +117,12 @@ class SumoEnv(gym.Env):
             # next_car_rewards[car_id] = (self.car_rewards.get(car_id, 0) +
             #                             self.stepLength * traci.vehicle.getFuelConsumption(car_id))
             # reward += -next_car_rewards[car_id]
-        reward = -traci.edge.getFuelConsumption(self.edgeID)
+            reward[car_id] = -traci.vehicle.getFuelConsumption(car_id) * self.stepLength
+
         # self.car_rewards = next_car_rewards
         done = False
         self.steps += 1
-        return next_obs, reward, done, did_action
+        return next_obs, reward, done, {}
 
     def render(self) -> RenderFrame | list[RenderFrame] | None:
         pass
