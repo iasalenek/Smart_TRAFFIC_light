@@ -194,7 +194,12 @@ def runSimulation(
             st, _ = envs[i].reset()
             state.append(st)
 
+        next_random_state = None
+
         for _ in range(simTime // STEP_LENGTH):
+
+            if next_random_state is not None:
+                random.setstate(next_random_state)
 
             if random.random() < pVehicle * stepLength:
 
@@ -211,6 +216,8 @@ def runSimulation(
                     vehID=veh_id, speed=random.randint(minSpeed, maxSpeed) / 3.6
                 )
                 veh_id += 1
+
+            next_random_state = random.getstate()
 
             stepVehicles = traci.vehicle.getIDList()
             for k in range(len(envs)):
