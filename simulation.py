@@ -159,7 +159,7 @@ def runSimulation(
     if torch.cuda.is_available():
         num_episodes = 600
     else:
-        num_episodes = 15
+        num_episodes = 50
 
     seeds = [randomSeed] * num_episodes
     traci.close()  # needed to start traci for constants initialization
@@ -262,7 +262,7 @@ if __name__ == "__main__":
     GAMMA = 0.99
     EPS_START = 0.9
     EPS_END = 0.05
-    EPS_DECAY = 1000
+    EPS_DECAY = 10000
     TAU = 0.005
     LR = 1e-4
 
