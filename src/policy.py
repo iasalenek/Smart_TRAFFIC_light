@@ -33,28 +33,18 @@ class SumoEnv(gym.Env):
         нарисовать графики
         """
         self.edgeID = edgeID
-        self.bound_steps = SIM_TIME // STEP_LENGTH
-        self.steps = 0
-        self.optimization_frequency = 5  # seconds
         self.max_speed = MAX_SPEED
         self.min_speed = MIN_SPEED
-        self.action_dim = 8  # split max/min speed in 8 parts
+        self.action_dim = 10  # split max/min speed in 8 parts
         self.actions = np.linspace(self.min_speed, self.max_speed, self.action_dim)
         self.action_space = Discrete(len(self.actions))
         self.n_traffic_lights = len(TRAFFIC_LIGTS)
-        # self.car_rewards = dict()
-        self.reward = 0
         self.stepLength = traci.simulation.getDeltaT()
         traci.edge.subscribe(self.edgeID, varIDs=[tc.LAST_STEP_VEHICLE_ID_LIST])
         #color_state for the nearest light ohe hot encoded, its time before the next color_state, distance, distance for the nearest car
         #and two flags if there is an upcoming light or a leading car ahead.
         #I want to count accelerated fuel consumption on a current edge as a reward. (with a '-')
-
         self.obs_dim = 8
-        obs_low = np.zeros((self.obs_dim,))
-        self.INFTY = 100000
-        obs_high = np.array([1, 1, 1, 100000, 100000, 100000, 1, 1])
-        self.observation_space = Box(low=obs_low, high=obs_high)
 
     def reset(self, **kwargs):
         return {}, {}
@@ -63,16 +53,9 @@ class SumoEnv(gym.Env):
             self, action: ActType
     ) -> tuple[dict[Any, ndarray[Any, dtype[Any]]], dict[Any, Any], bool, dict[Any, Any]]:
 
-        # vehicleIDs = traci.vehicle.getIDList()
-        # vehicleIDs = set(
-        #     traci.edge.getSubscriptionResults(self.edgeID)[tc.LAST_STEP_VEHICLE_ID_LIST]
-        # )
         vehicleIDs = traci.edge.getLastStepVehicleIDs(self.edgeID)
         vehicleIDs = list(filter(lambda x: traci.vehicle.getTypeID(x) == "connected", vehicleIDs))
-        did_action = False
         # acting
-        # if self.steps * self.stepLength >= 5:
-
         for vehicleID, speed_index in action.items():
             if vehicleID in vehicleIDs:
                 traci.vehicle.setSpeed(vehicleID, speed=(self.actions[int(speed_index)] / 3.6))
@@ -80,8 +63,6 @@ class SumoEnv(gym.Env):
         # next_obs
         next_obs = dict()
         reward = dict()
-        # next_car_rewards = dict()
-        done = dict()
         is_light = False
         is_leading_car = True
         for car_id in vehicleIDs:
@@ -114,15 +95,10 @@ class SumoEnv(gym.Env):
                 is_leading_car = False
                 leader_dist = 0
             next_obs[car_id] = np.array(color_state + [remaining_time, dist, leader_dist, is_light, is_leading_car])
-            # next_car_rewards[car_id] = (self.car_rewards.get(car_id, 0) +
-            #                             self.stepLength * traci.vehicle.getFuelConsumption(car_id))
-            # reward += -next_car_rewards[car_id]
-            # reward[car_id] = -traci.vehicle.getFuelConsumption(car_id) * self.stepLength
-            reward[car_id] = -traci.edge.getFuelConsumption(self.edgeID)
+            reward[car_id] = -traci.vehicle.getFuelConsumption(car_id) * self.stepLength
+            # reward[car_id] = -traci.edge.getFuelConsumption(self.edgeID)
 
-        # self.car_rewards = next_car_rewards
         done = False
-        self.steps += 1
         return next_obs, reward, done, {}
 
     def render(self) -> RenderFrame | list[RenderFrame] | None:

@@ -28,6 +28,10 @@ else:
     sys.exit("please declare environment variable 'SUMO_HOME'")
 
 
+steps_done = 0
+last_optimization = 10
+
+
 def runSimulation(
         configPath: str = CONFIG_PATH,
         simTime: int = SIM_TIME,
@@ -48,6 +52,8 @@ def runSimulation(
         sumoBinary = sumolib.checkBinary("sumo-gui")
     else:
         sumoBinary = sumolib.checkBinary("sumo")
+
+    global steps_done
 
     sumoCmd = [
         sumoBinary,
@@ -96,21 +102,12 @@ def runSimulation(
 
         #TODO
         non_final_next_states = torch.tensor(np.array(batch.next_state))
-
         state_batch = torch.tensor(np.array(batch.state))
-        # print(state_batch.shape)
-        # print(tuple(torch.tensor(arr) for arr in batch.action))
-        # action_batch = torch.cat(tuple(torch.tensor(arr).reshape(1) for arr in batch.action))
         action_batch = torch.tensor(tuple(arr.reshape(1).to(torch.int64) for arr in batch.action))
-
-        # reward_batch = torch.cat(tuple(torch.tensor(arr) for arr in batch.reward))
-        # reward_batch = np.concatenate(batch.reward)
         reward_batch = torch.tensor(batch.reward)
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
         # for each batch state according to policy_net
-        # print(state_batch.shape, torch.unsqueeze(action_batch, 1).shape)
-        # print(state_batch.shape)
         state_action_values = policy_net(state_batch).gather(1, torch.unsqueeze(action_batch, 1))
 
         # Compute V(s_{t+1}) for all next states.
@@ -148,10 +145,8 @@ def runSimulation(
         envs.append(SumoEnv(edgeID=edge))
 
     # Get number of actions from gym action space
-    n_actions = envs[0].action_dim  # TODO
+    n_actions = envs[0].action_dim
     # Get the number of state observations
-    # state, info = env.reset()
-    # state, info = envs[0].reset()  # TODO
     n_observations = envs[0].obs_dim
     policy_net = DQN(n_observations, n_actions).to(device)
     target_net = DQN(n_observations, n_actions).to(device)
@@ -164,17 +159,14 @@ def runSimulation(
     if torch.cuda.is_available():
         num_episodes = 600
     else:
-        num_episodes = 10
+        num_episodes = 15
 
-    # seeds = [x + 1 if x % 2 == 0 else randomSeed for x in range(2 * num_episodes)]
     seeds = [randomSeed] * num_episodes
-    # print(seeds)
     traci.close()  # needed to start traci for constants initialization
 
     for ind in range(num_episodes):
 
         traci.start(sumoCmd)
-        steps_done = 0
         reward_sum = 0
         metricsListners = []
         for edgeID in edgeIDs:
@@ -249,9 +241,8 @@ def runSimulation(
             steps_done += 1
 
         print(f"Episode {ind} is finished!")
-        # if ind % 2 == 1:
         loss_values.append(reward_sum / (simTime // STEP_LENGTH))
-        metrics.append( metricsListners)
+        metrics.append(metricsListners)
 
         traci.close()
 
@@ -267,8 +258,6 @@ if __name__ == "__main__":
     # EPS_DECAY controls the rate of exponential decay of epsilon, higher means a slower decay
     # TAU is the update rate of the target network
     # LR is the learning rate of the ``AdamW`` optimizer
-    steps_done = 0
-    last_optimization = 10
     BATCH_SIZE = 128
     GAMMA = 0.99
     EPS_START = 0.9
