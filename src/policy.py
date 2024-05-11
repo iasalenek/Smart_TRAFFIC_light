@@ -1,5 +1,6 @@
 import random
 from collections import namedtuple, deque
+from math import ceil
 from typing import Optional, List, Any, Tuple, Dict, Set
 
 import gymnasium as gym
@@ -8,18 +9,28 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import traci
+import sumolib
 from gymnasium.core import ActType, RenderFrame
 from gymnasium.spaces import Box, Discrete
 from numpy import ndarray, dtype
 from traci import StepListener
 from traci import constants as tc
-
+from vector2d import Vector2D
 from src.constants import *
+
+import os
+import sys
+if 'SUMO_HOME' in os.environ:
+    sys.path.append(os.path.join(os.environ['SUMO_HOME'], 'tools'))
+
+# net = sumolib.net.readNet("net.xml")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
+
+
 
 
 class SumoEnv(gym.Env):
@@ -41,10 +52,42 @@ class SumoEnv(gym.Env):
         self.n_traffic_lights = len(TRAFFIC_LIGTS)
         self.stepLength = traci.simulation.getDeltaT()
         traci.edge.subscribe(self.edgeID, varIDs=[tc.LAST_STEP_VEHICLE_ID_LIST])
+        # lanes = list(filter(lambda lane: traci.lane.getEdgeID(lane) == self.edgeID,  traci.lane.getIDList()))
+        # self.toNode = net.getEdge(self.edgeID).getToNode().getCoord()
+        # self.fromNode = net.getEdge(self.edgeID).getFromNode().getCoord()
+        # self.X = self.toNode[0] - self.fromNode[0]
+        # self.Y = self.toNode[1] - self.fromNode[1]
+        # self.edgeVector = Vector2D(self.X, self.Y)
+        # self.vehicleLength = traci.vehicle.getLength("connected")
+        print(traci.vehicletype.getIDList())
+        self.vehicleLength = (traci.vehicletype.getLength('connected'))
+        self.lanes_number = traci.edge.getLaneNumber(self.edgeID)
+        self.lane_length = traci.lane.getLength(self.edgeID + '_0')
+
+        self.number_of_fragments = ceil(self.lane_length / self.vehicleLength)
+        # self.fractions = [self.edgeVector * self.frac * i for i in range(1, ceil(self.lane_length/self.vehicleLength))]
+
         #color_state for the nearest light ohe hot encoded, its time before the next color_state, distance, distance for the nearest car
         #and two flags if there is an upcoming light or a leading car ahead.
         #I want to count accelerated fuel consumption on a current edge as a reward. (with a '-')
-        self.obs_dim = 8
+        self.obs_dim = 6 + self.number_of_fragments
+
+
+    def mark_fractions(self, carID, carsIDs):
+        laneID = traci.vehicle.getLaneID(carID)
+        toNode, fromNode = traci.lane.getShape(laneID)
+        laneX = fromNode[0] - toNode[0]
+        laneY = fromNode[1] - toNode[1]
+        laneVector = Vector2D(laneX, laneY)
+        on_frac = [0] * self.number_of_fragments
+        for car in carsIDs:
+            if car != carID and laneID == traci.vehicle.getLaneID(car):
+                x, y = traci.vehicle.getPosition(carID)
+                carVector = Vector2D(x, y)
+                proj = Vector2D.Project(carVector, laneVector)
+                index = proj.length / self.vehicleLength
+                on_frac[int(index)] = 1
+        return on_frac
 
     def reset(self, **kwargs):
         return {}, {}
@@ -64,7 +107,7 @@ class SumoEnv(gym.Env):
         next_obs = dict()
         reward = dict()
         is_light = False
-        is_leading_car = True
+        # is_leading_car = True
         for car_id in vehicleIDs:
             TLS_list = traci.vehicle.getNextTLS(car_id)
             TLS_list = sorted(TLS_list, key=lambda x: x[2])
@@ -90,11 +133,12 @@ class SumoEnv(gym.Env):
                 remaining_time = 0
                 dist = 0
 
-            leader_id, leader_dist = traci.vehicle.getLeader(car_id)
-            if leader_id == "":
-                is_leading_car = False
-                leader_dist = 0
-            next_obs[car_id] = np.array(color_state + [remaining_time, dist, leader_dist, is_light, is_leading_car])
+            # leader_id, leader_dist = traci.vehicle.getLeader(car_id)
+            # if leader_id == "":
+            #     is_leading_car = False
+            #     leader_dist = 0
+            marks = self.mark_fractions(car_id, vehicleIDs)
+            next_obs[car_id] = np.array(color_state + [remaining_time, dist, is_light] + marks)
             reward[car_id] = -traci.vehicle.getFuelConsumption(car_id) * self.stepLength
             # reward[car_id] = -traci.edge.getFuelConsumption(self.edgeID)
 

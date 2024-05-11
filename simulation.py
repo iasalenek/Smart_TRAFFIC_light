@@ -159,7 +159,7 @@ def runSimulation(
     if torch.cuda.is_available():
         num_episodes = 600
     else:
-        num_episodes = 50
+        num_episodes = 15
 
     seeds = [randomSeed] * num_episodes
     traci.close()  # needed to start traci for constants initialization
