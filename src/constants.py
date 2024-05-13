@@ -1,8 +1,9 @@
 CONFIG_PATH = "nets/single_agent/500m/config.sumocfg"
-SIM_TIME = 1 * 60 * 60
+SIM_TIME = 1 * 5 * 60
 P_VEHICLE = 0.3
 P_CONNECTED = 0.2
-MIN_SPEED = 10
+MIN_POLICY_SPEED = 10
+MIN_SPEED = 45
 MAX_SPEED = 60
 STEP_LENGTH = 1
 EDGE_IDS = ["E1"]

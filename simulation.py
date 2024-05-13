@@ -11,8 +11,11 @@ import torch.nn as nn
 import sumolib
 import traci
 import matplotlib.pyplot as plt
+from torch.utils.tensorboard import SummaryWriter
 
 loss_values = []
+
+writer = SummaryWriter(log_dir='logs')
 
 from src.policy import (BasePolicy, MaxSpeedPolicy, device,
                         SumoEnv, DQN, ReplayMemory, Transition)
@@ -65,11 +68,11 @@ def runSimulation(
         "--time-to-teleport", "-1",  # Телепортация автомобилей отключена
     ]
 
-    def select_action(state):  # state is actually a tuple of many states
+    def select_action(state, eval=False):  # state is actually a tuple of many states
         sample = random.random()
         eps_threshold = EPS_END + (EPS_START - EPS_END) * \
                         math.exp(-1. * steps_done / EPS_DECAY)
-        if sample > eps_threshold:
+        if sample > eps_threshold or eval:
             with torch.no_grad():
                 # t.max(1) will return the largest column value of each row.
                 # second column on max result is index of where max element was
@@ -101,7 +104,8 @@ def runSimulation(
                                                 batch.next_state)), device=device, dtype=torch.bool)
 
         #TODO
-        non_final_next_states = torch.tensor(np.array(batch.next_state))
+        non_final_next_states = torch.tensor(np.array([s for s in batch.next_state
+                                                if s is not None]))
         state_batch = torch.tensor(np.array(batch.state))
         action_batch = torch.tensor(tuple(arr.reshape(1).to(torch.int64) for arr in batch.action))
         reward_batch = torch.tensor(batch.reward)
@@ -159,9 +163,9 @@ def runSimulation(
     if torch.cuda.is_available():
         num_episodes = 600
     else:
-        num_episodes = 15
+        num_episodes = 300
 
-    seeds = [randomSeed] * num_episodes
+    seeds = [randomSeed+i+1 for i in range(num_episodes)]
     traci.close()  # needed to start traci for constants initialization
 
     for ind in range(num_episodes):
@@ -180,18 +184,21 @@ def runSimulation(
             traci.addStepListener(metricListner)
 
         veh_id = 0
-        random.seed(seeds[ind])
+        if ind % 10 != 0:
+            random.seed(seeds[ind])
+        else:
+            random.seed(randomSeed)
         state = []
         for i in range(len(envs)):
             st, _ = envs[i].reset()
             state.append(st)
 
-        next_random_state = None
+        # next_random_state = None
 
         for _ in range(simTime // STEP_LENGTH):
 
-            if next_random_state is not None:
-                random.setstate(next_random_state)
+            # if next_random_state is not None:
+            #     random.setstate(next_random_state)
 
             if random.random() < pVehicle * stepLength:
 
@@ -209,28 +216,33 @@ def runSimulation(
                 )
                 veh_id += 1
 
-            next_random_state = random.getstate()
+            # next_random_state = random.getstate()
 
             stepVehicles = traci.vehicle.getIDList()
             for k in range(len(envs)):
                 action = dict()
 
                 for car_id, obs in state[k].items():
-                    action[car_id] = select_action(obs)
+                    if obs is not None:
+                        if ind % 10 != 0: # evaluation
+                            action[car_id] = select_action(obs)
+                        else:
+                            action[car_id] = select_action(obs, True)
 
                 next_state, reward, done, _ = envs[k].step(action)
-                reward_sum += np.sum(np.array(list(reward.values())))
+                rewards = list(filter(lambda x: x is not None, list(reward.values())))
+                reward_sum += np.sum(np.array(rewards))
                 for car_id, obs in state[k].items():
-                    if car_id in next_state:
+                    if not done[car_id]:
                         rew = torch.tensor([reward[car_id]], device=device)
                         memory.push(obs, action[car_id], next_state[car_id], rew)
-                    elif car_id not in stepVehicles:
-                        memory.push(obs, action[car_id], None, None)
-
+                    else:
+                        # memory.push(obs, None, None, 0) #TODO
+                        ...
                 # reward = torch.tensor([reward], device=device)
-                state[k] = next_state
-
-            optimize_model()
+                state[k] = {k: v for k, v in next_state.items() if v is not None}
+            if ind % 10 != 0:
+                optimize_model()
             target_net_state_dict = target_net.state_dict()
             policy_net_state_dict = policy_net.state_dict()
             for key in policy_net_state_dict:
@@ -241,12 +253,16 @@ def runSimulation(
             steps_done += 1
 
         print(f"Episode {ind} is finished!")
-        loss_values.append(reward_sum / (simTime // STEP_LENGTH))
+        if ind % 10 == 0:
+            # loss_values.append(reward_sum / (simTime // STEP_LENGTH))
+            writer.add_scalar('Reward/evaluation', reward_sum / (simTime // STEP_LENGTH), ind)
+        else:
+            writer.add_scalar('Reward/learning', reward_sum / (simTime // STEP_LENGTH), ind)
         metrics.append(metricsListners)
 
         traci.close()
 
-    return metrics, list(policy_net.parameters())
+    return metrics, policy_net
 
 
 if __name__ == "__main__":
@@ -266,13 +282,12 @@ if __name__ == "__main__":
     TAU = 0.005
     LR = 1e-4
 
-    metrics, weights = runSimulation()
+    metrics, model = runSimulation()
     # _, weights = runSimulation()
     for epoch in metrics:
         for metricListner in epoch:
             print(metricListner)
-    plt.plot(loss_values)
-    weights_file = open("weights.txt", 'w')
-    weights_file.write(str(weights))
-    weights_file.close()
-    plt.show()
+    # plt.plot(loss_values)
+    torch.save(model.state_dict(), "weights.txt")
+    writer.close()
+    # plt.show()
