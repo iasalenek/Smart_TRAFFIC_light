@@ -7,9 +7,9 @@ import sys
 import threading
 import sumolib
 import traci
-from src.policyTraffic import trainTraffic
-from src.policy import BasePolicy, NeuroPolicy
-from src.metrics import MeanEdgeFuelConsumption, MeanEdgeTime
+from simulationUtils.policyTraffic import trainTraffic
+from simulationUtils.policy import BasePolicy, NeuroPolicy
+from simulationUtils.metrics import MeanEdgeFuelConsumption, MeanEdgeTime
 
 
 CONFIG_PATH = "nets/single_agent/500m/config.sumocfg"

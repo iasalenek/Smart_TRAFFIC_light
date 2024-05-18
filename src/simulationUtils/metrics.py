@@ -4,7 +4,7 @@ import numpy as np
 import traci
 import traci.constants as tc
 from traci import StepListener
-from src.policyTraffic import *
+from .policyTraffic import *
 
 
 class EdgeMetric(StepListener):
