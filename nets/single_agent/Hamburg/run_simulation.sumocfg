@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<configuration>
+
+    <input>
+        <net-file value="network.net.xml.gz"/>
+        <additional-files value="busStops.add.xml"/>
+        <route-files value="bus_route.rou.xml, vType.xml, PKW_automatic.rou.xml.gz"/>
+    </input>
+
+    <time>
+        <begin value="000"/>
+        <end value="200"/>
+    </time>
+
+</configuration>

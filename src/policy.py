@@ -18,10 +18,12 @@ class BasePolicy(StepListener):
         self.edgeIDs = edgeIDs
         self.trafficlightIDs = trafficlightIDs
         # Проверяем наличие всех ребер
-        assert set(self.edgeIDs).issubset(traci.edge.getIDList())
+        extraEdges = set(self.edgeIDs) - set(traci.edge.getIDList())
+        assert not extraEdges, f"Нет ребер {extraEdges}"
         # Проверяем наличие всех светофоров
         if trafficlightIDs is not None:
-            assert set(self.trafficlightIDs).issubset(traci.trafficlight.getIDList())
+            extraTrafficlights = set(self.trafficlightIDs) - set(traci.trafficlight.getIDList())
+            assert not extraTrafficlights, f"Нет светофоров {extraTrafficlights}"
 
     def step(self, t=0):
         return super().step(t)
