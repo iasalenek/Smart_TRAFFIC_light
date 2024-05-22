@@ -43,11 +43,11 @@ class EdgeMetric(StepListener):
             for vehicletype, values in self._nonAggregatedValues.items()
         }
 
-    # def __repr__(self) -> str:
-    #     repr = f"{self.metricName}:\n"
-    #     for vehicletype, value in self.aggregatedValues.items():
-    #         repr += f"{vehicletype[:10]:<10} --- {value:>10.4f}\n"
-    #     return repr
+    def __repr__(self) -> str:
+        repr = f"{self.metricName}:\n"
+        for vehicletype, value in self.aggregatedValues.items():
+            repr += f"{vehicletype[:10]:<10} --- {value:>10.4f}\n"
+        return repr
 
 
 class MeanEdgeTime(EdgeMetric):
@@ -135,19 +135,14 @@ class MeanEdgeFuelConsumption(EdgeMetric):
                 vehicleID)
             traci.vehicle.subscribe(vehicleID, varIDs=[tc.VAR_FUELCONSUMPTION])
         # Для всех автомобилей на ребре обновляем метрику
-        sum_all = 0.0
+        # sum_all = 0.0
         for vehicleID in self._vehicleIdFuelDict:
-            self._vehicleIdFuelDict[vehicleID] += (
+            delta = (
                 traci.vehicle.getSubscriptionResults(vehicleID)[
                     tc.VAR_FUELCONSUMPTION] * self.stepLength)
-        ids = 0
-        for vehicleID in self.train_model.get_id():
-            if vehicleID in self._vehicleIdFuelDict:
-                sum_all += (traci.vehicle.getSubscriptionResults(vehicleID)
-                            [tc.VAR_FUELCONSUMPTION] * self.stepLength)
-                ids += 1
-        if ids == 0:
-            self.train_model.set_reward(700)
-        else:
-            self.train_model.set_reward(sum_all * NUMBER_OF_CARS / ids)
+            # if vehicleID in self.train_model.use_real_ids:
+            #     sum_all += delta
+            self._vehicleIdFuelDict[vehicleID] += delta
+        # print(sum_all)
+        # self.train_model.set_reward(sum_all)
         return super().step(t)

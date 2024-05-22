@@ -77,15 +77,12 @@ class NeuroPolicy(BasePolicy):
         self.speed = speed
 
     def apply_action(self):
-        if self.train_model.get_id() is None:
-            return
         for edgeID in self.edgeIDs:
-            for id, vehicleID in enumerate(self.train_model.get_id()):
-                if vehicleID != - \
-                        1 and vehicleID in traci.edge.getLastStepVehicleIDs(edgeID):
-                    if traci.vehicle.getTypeID(vehicleID) == "connected":
-                        super().apply_action(
-                            vehicleID, self.train_model.get_speed()[id])
+            for id in self.train_model.use_real_ids:
+                if id in traci.edge.getLastStepVehicleIDs(edgeID):
+                     if traci.vehicle.getTypeID(id) == "connected":
+                        model_id = self.train_model.to_id(id)
+                        super().apply_action(id, traci.vehicle.getSpeed(id) * 3.6 + self.train_model.get_speed_diff(model_id))
 
     def step(self, t=0):
 
@@ -97,55 +94,22 @@ class NeuroPolicy(BasePolicy):
             connected_venicles = [
                 i for i in all_venicles if traci.vehicle.getTypeID(i) == "connected"]
 
-            inds = [i for i in connected_venicles]
-            if len(inds) > NUMBER_OF_CARS:
-                inds = np.random.choice(inds, NUMBER_OF_CARS, replace=False)
 
-            def init_vector(vec, d, EXTRA_MIN=0):
-                while len(vec) < d:
-                    vec.append(EXTRA_MIN)
-                return vec[:d]
+            self.train_model.set_and_clear_ids(connected_venicles)
 
-            if len(inds) != 0:
-                # add vector phace
-                id_random = np.random.choice(inds, 1)[0]
-                tlss = traci.vehicle.getNextTLS(id_random)
-                phace = [0 for _ in range(NUMBER_OF_CARS)]
-                tlsId = tlss[0][0]
-                val = traci.trafficlight.getPhase(tlsId)
+            for id_venicle in connected_venicles:
+                sorted_tlss =  sorted(traci.vehicle.getNextTLS(id_venicle), key=lambda x: x[2])
+                phace = [0 for _ in range(5)]
+                val = traci.trafficlight.getPhase(sorted_tlss[0][0])
                 phace[val] = 1
-            else:
-                phace = [0 for _ in range(NUMBER_OF_CARS)]
+                dist_to_tlss = abs(traci.vehicle.getDistance(id_venicle) - sorted_tlss[0][2])
+                speed = traci.vehicle.getSpeed(id_venicle) * 3.6
+                remaining_time = traci.trafficlight.getNextSwitch(sorted_tlss[0][0])
 
-            deltaDist = 1000
-            deltaSpid = 100
-            connected_dist_vector = [
-                (traci.vehicle.getDistance(i) + deltaDist) / 2000 for i in inds]
-            connected_speed_vector = [
-                (traci.vehicle.getSpeed(i) + deltaSpid) / 160 for i in inds]
-            connected_dist_light = [
-                (abs(
-                    traci.vehicle.getDistance(i) -
-                    sorted(
-                        traci.vehicle.getNextTLS(i),
-                        key=lambda x: x[1])[0][2]) +
-                    deltaDist) /
-                2000 for i in inds]
-
-            connected_ids = init_vector(inds[:], NUMBER_OF_CARS, -1)
-            connected_dist_vector = init_vector(
-                connected_dist_vector, NUMBER_OF_CARS)
-            connected_speed_vector = init_vector(
-                connected_speed_vector, NUMBER_OF_CARS)
-            connected_dist_light = init_vector(
-                connected_dist_light, NUMBER_OF_CARS, 0)
-
-            result_state = [connected_dist_vector,
-                            connected_speed_vector,
-                            connected_dist_light,
-                            phace]
-            result_state = np.array(result_state).reshape(-1)
-            self.train_model.set_state(result_state)
-            self.train_model.set_id(connected_ids)
+                result_vec = np.array([traci.vehicle.getDistance(id_venicle)]
+                + [speed]
+                + [dist_to_tlss]  + phace + [remaining_time] + [1.0],dtype=np.float64)
+                
+                self.train_model.set_obs_agent(self.train_model.to_id(id_venicle), result_vec)
 
         return super().step(t)

@@ -1,5 +1,6 @@
 import model
 import simulationUtils
+import numpy as np
 
 if __name__ == "__main__":
     # model.run(simulationUtils.initSimulation,
@@ -11,6 +12,24 @@ if __name__ == "__main__":
     #     replay_buffer_start_size=1000)
 
     tf = simulationUtils.initSimulation()
-    for _ in range(simulationUtils.SIM_TIME // simulationUtils.STEP_LENGTH):
-        tf.step(0)
+    for _ in range(10):
+        
+        indexes = np.nonzero(tf.get_avail_agent_actions(0))[0]
+        print(len(tf.get_avail_agent_actions(0)))
+        reward, term = tf.step((np.nonzero(tf.get_avail_agent_actions(0))[0][0],
+                       np.nonzero(tf.get_avail_agent_actions(1))[0][0],
+                       np.nonzero(tf.get_avail_agent_actions(2))[0][0]))
+        if term:
+            break
+    tf.close()
+
+    tf = simulationUtils.initSimulation()
+    for _ in range(100000):
+        
+        indexes = np.nonzero(tf.get_avail_agent_actions(0))[0]
+        reward, term = tf.step((np.nonzero(tf.get_avail_agent_actions(0))[0][0],
+                       np.nonzero(tf.get_avail_agent_actions(1))[0][0],
+                       np.nonzero(tf.get_avail_agent_actions(2))[0][0]))
+        if term:
+            break
     tf.close()

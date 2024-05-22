@@ -12,6 +12,7 @@ class ReplayBuffer():
         self.r = deque(maxlen=max_size)
         self.s_prime = deque(maxlen=max_size)
         self.done = deque(maxlen=max_size)
+        self.add = deque(maxlen=max_size)
 
     def put(self, transition):
         self.s.append(transition[0])
@@ -19,6 +20,7 @@ class ReplayBuffer():
         self.r.append(transition[2])
         self.s_prime.append(transition[3])
         self.done.append(transition[4])
+        self.add.append(transition[5])
 
     def __len__(self):
         return len(self.s)
@@ -31,4 +33,5 @@ class ReplayBuffer():
             self.a)[inds], th.tensor(
             self.r)[inds], th.tensor(
                 self.s_prime, dtype=th.float)[inds], th.tensor(
-                    self.done)[inds]
+                    self.done)[inds], th.tensor(self.add, dtype=th.float)[inds]
+ 

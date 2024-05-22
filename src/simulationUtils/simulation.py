@@ -7,16 +7,16 @@ import sys
 import threading
 import sumolib
 import traci
-from simulationUtils.policyTraffic import trainTraffic
-from simulationUtils.policy import BasePolicy, NeuroPolicy
-from simulationUtils.metrics import MeanEdgeFuelConsumption, MeanEdgeTime
+from .policyTraffic import trainTraffic
+from .policy import BasePolicy, NeuroPolicy
+from .metrics import MeanEdgeFuelConsumption, MeanEdgeTime
 
 
 CONFIG_PATH = "nets/single_agent/500m/config.sumocfg"
 # SIM_TIME = 1 * 60 * 60
 SIM_TIME = 1 * 60 * 60 * 60
 P_VEHICLE = 0.3
-P_CONNECTED = 0.2
+P_CONNECTED = 0.1
 MIN_SPEED = 45
 MAX_SPEED = 60
 
@@ -26,7 +26,7 @@ TRAFFIC_LIGTS = ["J2"]
 VEHICLETYPE_IDS = ["ordinary", "connected"]
 RANDOM_SEED = 42
 SUMO_SEED = 42
-USE_GUI = False
+USE_GUI = True
 
 # lck = lock_guard()
 # model = trainTraffic(lck)
@@ -56,6 +56,7 @@ class SimulationTraffic:
         self.trainTraffic_ = trainTraffic_
 
     def step(self):
+        self.applyPolicy()
         if random.random() < self.pVehicle * self.stepLength:
 
             if random.random() < self.pConnected:
@@ -76,7 +77,6 @@ class SimulationTraffic:
                     self.minSpeed, self.maxSpeed) / 3.6)
             self.veh_id += 1
 
-        self.applyPolicy()
         traci.simulationStep()
         self.applyReward()
         self.setState()
@@ -88,6 +88,19 @@ class SimulationTraffic:
         self.policy.step()
 
     def applyReward(self):
+        sum_reward = 0.0
+        sz = 0
+        for i in self.trainTraffic_.use_real_ids:
+            try:
+                sum_reward += traci.vehicle.getFuelConsumption(i) * self.stepLength
+                sz += 1
+            except:
+                sum_reward += 0.0
+        if sz == 0:
+            self.trainTraffic_.set_reward(0)
+        else:
+            self.trainTraffic_.set_reward(sum_reward/sz)
+        # self.trainTraffic_.set_reward(sum_reward)
         for metricListner in self.metricListner_:
             metricListner.step()
 
@@ -157,23 +170,50 @@ class SimulationTraffic:
                     model=self.trainTraffic_),
             ]
 
+    #     metricsListners = []
+    # for edgeID in edgeIDs:
+    #     metricsListners += [
+    #         MeanEdgeTime(edgeID=edgeID, vehicletypeIDs=vehicletypeIDs),
+    #         MeanEdgeFuelConsumption(edgeID=edgeID, vehicletypeIDs=vehicletypeIDs),
+    #     ]
+
+
+        for metricListner in self.metricListner_:
+            traci.addStepListener(metricListner)
+
         self.policy = policyListner
         random.seed(randomSeed)
         return True
 
+    def init(self):
+        tf = trainTraffic(self)
+        self.setTrainTraffic(tf)
+        self.start(
+            policyListner=NeuroPolicy,
+            policyOptions={'speed': 30}
+        )
+        tf.step_while()
+    
+    def reset(self):
+        self.close()
+        self = SimulationTraffic()
+        self.init()
+
     def close(self):
+        for i in self.metricListner_:
+            i.cleanUp()
         print("--->", self.metricListner_)
         traci.close()
 
         return self.metricListner_
 
 
-all_actions = trainTraffic.init_actions()
+# all_actions = trainTraffic.init_actions()
 
 
 def initSimulation() -> trainTraffic:
     cm = SimulationTraffic()
-    tf = trainTraffic(cm, speed_dct=all_actions)
+    tf = trainTraffic(cm)
     cm.setTrainTraffic(tf)
 
     cm.start(
@@ -186,7 +226,14 @@ def initSimulation() -> trainTraffic:
 
 
 if __name__ == "__main__":
-    tf = initSimulation()
-    for _ in range(SIM_TIME // STEP_LENGTH):
-        tf.step(0)
-    tf.close()
+    env = SimulationTraffic()
+    env.init()
+    env.step(0)
+    env.step(0)
+    env.step(0)
+    env.reset()
+
+    # tf = initSimulation()
+    # for _ in range(SIM_TIME // STEP_LENGTH):
+    #     tf.step(0)
+    # tf.close()
