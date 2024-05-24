@@ -44,7 +44,7 @@ class SumoEnv(gym.Env):
         self.edgeID = edgeID
         self.max_speed = MAX_SPEED
         self.min_speed = MIN_POLICY_SPEED
-        self.action_dim = 10  # split max/min speed in 8 parts
+        self.action_dim = 10  # split max/min speed in 10 parts
         self.actions = np.linspace(self.min_speed, self.max_speed, self.action_dim)
         self.action_space = Discrete(len(self.actions))
         self.n_traffic_lights = len(TRAFFIC_LIGTS)

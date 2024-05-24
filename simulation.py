@@ -36,11 +36,11 @@ last_optimization = 10
 
 
 def runSimulation(
+        pConnected: float = P_CONNECTED,
         configPath: str = CONFIG_PATH,
         simTime: int = SIM_TIME,
         policyListner: Optional[BasePolicy] = MaxSpeedPolicy,
         pVehicle: float = P_VEHICLE,
-        pConnected: float = P_CONNECTED,
         minSpeed: float = MIN_SPEED,
         maxSpeed: float = MAX_SPEED,
         stepLength: float = STEP_LENGTH,
@@ -163,13 +163,13 @@ def runSimulation(
     if torch.cuda.is_available():
         num_episodes = 600
     else:
-        num_episodes = 300
+        num_episodes = 600
 
     seeds = [randomSeed+i+1 for i in range(num_episodes)]
     traci.close()  # needed to start traci for constants initialization
-
+    last_action_dict = dict()
     for ind in range(num_episodes):
-
+        action_dict = dict()
         traci.start(sumoCmd)
         reward_sum = 0
         metricsListners = []
@@ -228,6 +228,9 @@ def runSimulation(
                             action[car_id] = select_action(obs)
                         else:
                             action[car_id] = select_action(obs, True)
+                        int_action = int(action[car_id].item())
+                        action_dict[int_action] = action_dict.get(int_action, 0) + 1
+
 
                 next_state, reward, done, _ = envs[k].step(action)
                 rewards = list(filter(lambda x: x is not None, list(reward.values())))
@@ -255,14 +258,17 @@ def runSimulation(
         print(f"Episode {ind} is finished!")
         if ind % 10 == 0:
             # loss_values.append(reward_sum / (simTime // STEP_LENGTH))
-            writer.add_scalar('Reward/evaluation', reward_sum / (simTime // STEP_LENGTH), ind)
+            writer.add_scalar(str(pConnected) + '/Reward/evaluation', reward_sum / (simTime // STEP_LENGTH), ind)
         else:
-            writer.add_scalar('Reward/learning', reward_sum / (simTime // STEP_LENGTH), ind)
-        metrics.append(metricsListners)
+            writer.add_scalar(str(pConnected) + '/Reward/learning', reward_sum / (simTime // STEP_LENGTH), ind)
+
+            metrics.append(metricsListners)
+
+            last_action_dict = action_dict
 
         traci.close()
 
-    return metrics, policy_net
+    return metrics, policy_net, last_action_dict
 
 
 if __name__ == "__main__":
@@ -282,12 +288,21 @@ if __name__ == "__main__":
     TAU = 0.005
     LR = 1e-4
 
-    metrics, model = runSimulation()
+    metrics, model, action_dict = runSimulation(P_CONNECTED)
     # _, weights = runSimulation()
-    for epoch in metrics:
+    total_actions = sum(list(action_dict.values()))
+    for k, v in action_dict.items():
+        action_dict[k] /= total_actions
+    # print(action_dict)
+    for i, epoch in enumerate(metrics):
         for metricListner in epoch:
-            print(metricListner)
+            for vehicletype, value in metricListner.aggregatedValues.items():
+                writer.add_scalar(metricListner.metricName + '/' + vehicletype[:10], value, i)
+            # print(metricListner)
     # plt.plot(loss_values)
-    torch.save(model.state_dict(), "weights.txt")
+    # torch.save(model.state_dict(), "weights.txt")
+    for key, value in sorted(action_dict.items(), key=lambda x: x[0]):
+        print("{} : {}".format(key, value))
+    # print(action_dict)
     writer.close()
     # plt.show()
