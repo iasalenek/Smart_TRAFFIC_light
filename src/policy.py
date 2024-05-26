@@ -82,7 +82,7 @@ class SumoEnv(gym.Env):
                 if car != carID:
                     position = traci.vehicle.getLanePosition(car)
                     index = position / self.vehicleLength
-                    on_frac[i * self.number_of_fragments + int(index)] = 1
+                    on_frac[i * self.number_of_fragments + int(index)] = traci.vehicle.getSpeed(car)
         return on_frac
 
     def reset(self, **kwargs):
