@@ -4,8 +4,8 @@ import copy
 from .simulation import *
 
 NUMBER_OF_CARS = 1
-NUMBER_OF_STATES_BY_CAR = 60
-DEFAULT_STATE = (0,0,0,0,0,0,0,0,0,0)
+NUMBER_OF_STATES_BY_CAR = 5
+DEFAULT_STATE = tuple(0 for i in range(18))
 
 
 class Buffer:
@@ -44,8 +44,8 @@ class trainTraffic:
         self.simulation_ = simultation
         self.speed_dct = {}
 
-        for i in range(NUMBER_OF_STATES_BY_CAR - 1):
-            self.speed_dct[i + 1] = 60 / (NUMBER_OF_STATES_BY_CAR - 2) * i + -30
+        for i in range(1,NUMBER_OF_STATES_BY_CAR + 1):
+            self.speed_dct[i] = 30 / (NUMBER_OF_STATES_BY_CAR - 1) * i + 30
         self.speed_dct[0] = 0
         # print(self.speed_dct[i + 1])
 
@@ -71,6 +71,9 @@ class trainTraffic:
                 return i
         return None
 
+    def actual_cars(self):
+        return [self.from_id_dict[i] for i in self.use_ids if self.get_obs_agent(i) != DEFAULT_STATE]
+
     def get_buffer_previus(self):
         return self.buffer
 
@@ -81,7 +84,7 @@ class trainTraffic:
             copy.deepcopy(self.to_id_dict),
             copy.deepcopy(self.from_id_dict))
             )
-
+        self.agent_obs.clear()
         connected = set(connected)
         # чистит старые и устанавливает новые ids
         new_keys =  set(self.to_id_dict.keys()).intersection(connected)
@@ -121,29 +124,23 @@ class trainTraffic:
         if real_id_now not in self.buffer.getValue()[0]:
             return DEFAULT_STATE
 
-        if self.buffer is not None:
-            if agent_id in self.buffer.getValue()[1]:
-                real_id_previos = self.buffer.getValue()[3][agent_id]
-                if real_id_now != real_id_previos:
-                    print("FFF")
-                    return DEFAULT_STATE
-
-        return self.agent_obs[agent_id]
+        return tuple(self.agent_obs[agent_id])
     
     def is_good(self, speed):
         return speed >= 30 and speed <= 60
 
     def get_avail_agent_actions(self, agent_id):
-        if agent_id not in self.use_ids:
+        if agent_id not in self.use_ids or (self.get_obs_agent(agent_id) == DEFAULT_STATE):
             mask_action = [0 for _ in range(NUMBER_OF_STATES_BY_CAR)]
             mask_action[0] = 1
             # print(mask_action,0,self.speed_dct)
             return mask_action
 
         # state_ = self.get_obs_agent(agent_id)
-        speed = traci.vehicle.getSpeed(self.from_id_dict[agent_id]) * 3.6
+        # speed = traci.vehicle.getSpeed(self.from_id_dict[agent_id]) * 3.6
         # print(speed)
-        mask_action = [self.is_good(speed + self.speed_dct[i]) for i in range(NUMBER_OF_STATES_BY_CAR)]
+        mask_action = [1 for i in range(NUMBER_OF_STATES_BY_CAR)]
+        mask_action[0] = 0
         # print(mask_action,speed,self.speed_dct)
         return mask_action
 
@@ -152,18 +149,19 @@ class trainTraffic:
     def get_speed_diff(self, agent_id):
         if agent_id not in self.use_ids:
             return None
-        return self.speed_dct[self.action[agent_id]]
+        rs = self.action[agent_id]
+        return self.speed_dct[rs]
 
     def step(self, ak):
         self.time += 1
         self.action = ak
-        self.agent_obs.clear()
+        # self.agent_obs.clear()
         self.step_while()
         if self.reward is None:
             raise RuntimeError
         ret_value = self.reward
         self.reward = None
-        return -ret_value/1000000, (self.time > 1000)
+        return -ret_value, (self.time > 500)
 
     def close(self):
         self.time = 0

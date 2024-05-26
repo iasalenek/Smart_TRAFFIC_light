@@ -16,7 +16,7 @@ CONFIG_PATH = "nets/single_agent/500m/config.sumocfg"
 # SIM_TIME = 1 * 60 * 60
 SIM_TIME = 1 * 60 * 60 * 60
 P_VEHICLE = 0.3
-P_CONNECTED = 0.1
+P_CONNECTED = 0.3
 MIN_SPEED = 45
 MAX_SPEED = 60
 
@@ -90,17 +90,24 @@ class SimulationTraffic:
     def applyReward(self):
         sum_reward = 0.0
         sz = 0
-        for i in self.trainTraffic_.use_real_ids:
+        ls = []
+        for i in self.trainTraffic_.actual_cars():
             try:
-                sum_reward += traci.vehicle.getFuelConsumption(i) * self.stepLength
+                # sum_reward += traci.vehicle.getFuelConsumption(i) * self.stepLength
+                ls.append(traci.vehicle.getFuelConsumption(i) * self.stepLength)
                 sz += 1
             except:
                 sum_reward += 0.0
-        if sz == 0:
-            self.trainTraffic_.set_reward(0)
+        # if sz == 0:
+        #     self.trainTraffic_.set_reward(0)
+        # else:
+        #     self.trainTraffic_.set_reward(sum_reward/sz)
+        if len(ls) == 0:
+            sum_reward = 0
         else:
-            self.trainTraffic_.set_reward(sum_reward/sz)
-        # self.trainTraffic_.set_reward(sum_reward)
+            sum_reward = max(ls)
+            # print(ls)
+        self.trainTraffic_.set_reward(sum_reward)
         for metricListner in self.metricListner_:
             metricListner.step()
 

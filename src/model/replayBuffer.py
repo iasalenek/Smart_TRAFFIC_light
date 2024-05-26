@@ -31,7 +31,7 @@ class ReplayBuffer():
         return th.tensor(
             self.s, dtype=th.float)[inds], th.tensor(
             self.a)[inds], th.tensor(
-            self.r)[inds], th.tensor(
+            self.r, dtype=th.float)[inds], th.tensor(
                 self.s_prime, dtype=th.float)[inds], th.tensor(
                     self.done)[inds], th.tensor(self.add, dtype=th.float)[inds]
  

@@ -7,7 +7,7 @@ from torch import optim
 from .replayBuffer import ReplayBuffer
 
 device = th.device("cuda" if th.cuda.is_available() else "cpu")
-print(device)
+# print(device)
 
 class QNetwork(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
