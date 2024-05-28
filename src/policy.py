@@ -69,21 +69,27 @@ class SumoEnv(gym.Env):
         #color_state for the nearest light ohe hot encoded, its time before the next color_state, distance, distance for the nearest car
         #and two flags if there is an upcoming light or a leading car ahead.
         #I want to count accelerated fuel consumption on a current edge as a reward. (with a '-')
-        self.obs_dim = 6 + self.number_of_fragments * self.lanes_number
+        self.obs_dim = 6 + 2 * self.number_of_fragments * self.lanes_number
 
 
     def mark_fractions(self, carID):
-        laneID = traci.vehicle.getLaneID(carID)
+        # laneID = traci.vehicle.getLaneID(carID)
         on_frac = [0] * self.number_of_fragments * self.lanes_number
+        speeds = [0] * self.number_of_fragments * self.lanes_number
         laneIDs = [self.edgeID + '_' + str(i) for i in range(self.lanes_number)]
         for i in range(self.lanes_number):
             carsIDs = traci.lane.getLastStepVehicleIDs(laneIDs[i])
             for car in carsIDs:
+                position = traci.vehicle.getLanePosition(car)
+                index = position / self.vehicleLength
                 if car != carID:
-                    position = traci.vehicle.getLanePosition(car)
-                    index = position / self.vehicleLength
-                    on_frac[i * self.number_of_fragments + int(index)] = traci.vehicle.getSpeed(car)
-        return on_frac
+                    if on_frac[i * self.number_of_fragments + int(index)] != 2: # to save our main car's mark
+                        on_frac[i * self.number_of_fragments + int(index)] = 1
+                else:
+                    on_frac[i * self.number_of_fragments + int(index)] = 2
+                speeds[i * self.number_of_fragments + int(index)] = traci.vehicle.getSpeed(car)
+
+        return on_frac + speeds
 
     def reset(self, **kwargs):
         return {}, {}
