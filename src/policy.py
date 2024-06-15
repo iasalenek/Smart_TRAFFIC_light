@@ -18,7 +18,6 @@ import time
 from src.dqn import DQN
 from src.metrics import MeanEdgeFuelConsumption
 
-_INF_PROX = 2000
 
 
 class BasePolicy(StepListener):
@@ -167,7 +166,6 @@ class MyPolicy(BasePolicy):
                                     transition
                                 )
 
-                                # self.rewards.append(reward)
                                 self.prev_fuel[vehicleID] = self.get_total_fuel_cons(vehicleID)
                             else:
                                 loss = self.agent.update(transition)

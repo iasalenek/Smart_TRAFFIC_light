@@ -103,22 +103,6 @@ class DQN:
     def save(self):
         torch.save(self.model, "agent.pkl")
 
-
-def evaluate_policy(agent, episodes=5):
-    env = make("LunarLander-v2")
-    returns = []
-    for _ in range(episodes):
-        done = False
-        state = env.reset()[0]
-        total_reward = 0.
-
-        while not done:
-            state, reward, done, _, _ = env.step(agent.act(state))
-            total_reward += reward
-        returns.append(total_reward)
-    return returns
-
-
 if __name__ == "__main__":
     env = make("LunarLander-v2")
 
