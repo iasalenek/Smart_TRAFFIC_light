@@ -2,6 +2,7 @@ from typing import List, Optional
 
 import sumolib.net.node
 
+import random
 
 import traci
 from traci import StepListener
@@ -9,28 +10,30 @@ from traci import StepListener
 from typing import Dict
 
 import numpy as np
+import matplotlib.pyplot as plt
+import torch
 
-from Smart_TRAFFIC_light.src.dqn import DQN
-from Smart_TRAFFIC_light.src.metrics import MeanEdgeFuelConsumption
+import time
 
-POLICY_MIN_SPEED = 30
-POLICY_MAX_SPEED = 60
+from src.dqn import DQN
+from src.metrics import MeanEdgeFuelConsumption
 
-GREEN_LIGHT_TF = 0
-RED_LIGHT_TF = 0
-
-INF_PROX = 2000
+_INF_PROX = 2000
 
 
 class BasePolicy(StepListener):
     def __init__(
             self,
             edge_ids: List[str],
+            min_speed: int,
+            max_speed: int,
             tf_ids: Optional[List[str]] = None,
             **kwargs,
     ) -> None:
         super(BasePolicy, self).__init__(**kwargs)
         self.edge_ids = edge_ids
+        self._min_speed = min_speed
+        self._max_speed = max_speed
         self.tf_ids = tf_ids
         # Проверяем наличие всех ребер
         assert set(self.edge_ids).issubset(traci.edge.getIDList())
@@ -41,13 +44,12 @@ class BasePolicy(StepListener):
     def step(self, t=0):
         return super().step(t)
 
-    @staticmethod
-    def apply_action(vehicleID: str, speed: float):
+    def apply_action(self, vehicleID: str, speed: float):
         assert (
                 traci.vehicle.getTypeID(vehicleID) == "connected"
         ), f"vehicle {vehicleID} is not connected"
-        assert (speed >= POLICY_MIN_SPEED) and (
-                speed <= POLICY_MAX_SPEED
+        assert (speed >= self._min_speed) and (
+                speed <= self._max_speed
         ), "The speed is beyond the limit"
         traci.vehicle.setSpeed(vehID=vehicleID, speed=speed / 3.6)
 
@@ -56,12 +58,16 @@ class FixedSpeedPolicy(BasePolicy):
     def __init__(
             self,
             speed: int,
+            min_speed: int,
+            max_speed: int,
             edge_ids: List[str],
             tf_ids: Optional[List[str]] = None,
             **kwargs,
     ) -> None:
         super(FixedSpeedPolicy, self).__init__(edge_ids, tf_ids, **kwargs)
-        assert (speed >= POLICY_MIN_SPEED) and (speed <= POLICY_MAX_SPEED)
+        self._min_speed = min_speed
+        self._max_speed = max_speed
+        assert (speed >= self._min_speed) and (speed <= self._max_speed)
         self.speed = speed
 
     def step(self, t=0):
@@ -76,85 +82,131 @@ class FixedSpeedPolicy(BasePolicy):
 class MyPolicy(BasePolicy):
     def __init__(
             self,
+            min_speed: int,
+            max_speed: int,
+            edge_ids: List[str],
             net: sumolib.net.Net,
             step_length: int,
-            edge_ids: List[str],
             fuel_metric: MeanEdgeFuelConsumption,
+            initial_steps_count: int,
             tf_ids: Optional[List[str]] = None,
             **kwargs,
     ) -> None:
-        exp_replay_size = 1
-        input_dim = 1
-        output_dim = POLICY_MAX_SPEED - POLICY_MIN_SPEED
+        self._step_count = 0
+        self._min_speed = min_speed
+        self._max_speed = max_speed
+        self._initial_steps_count = initial_steps_count
+
         self.fuel_metric: MeanEdgeFuelConsumption = fuel_metric
-        self.agent = DQN(seed=1423, layer_sizes=[input_dim, 64, output_dim], lr=1e-3, sync_freq=5,
-                         exp_replay_size=exp_replay_size)
+        self.agent = DQN(2, self._max_speed - self._min_speed)
         self.obs, self.done, self.losses, self.ep_len, self.rew = [], False, 0, 0, 0
+
+        self.eps = 0.1
 
         self.step_length = step_length
 
         self.losses_list, self.reward_list, self.episode_len_list, self.epsilon_list = [], [], [], []
-        self.rew = []
+        self.rewards = []
         self.index = 128
         self.episodes = 10000
         self.epsilon = 0.3
         self.tf_ids = tf_ids
         self.net = net
+        self.is_exploration = {}
 
-        self.prev_obs: Dict[int, int] = {}
+        self.figure = plt.figure()
+
+        self.prev_states: Dict[int, int] = {}
         self.prev_actions: Dict[int, int] = {}
         self.prev_fuel: Dict[int, int] = {}
+        plt.ion()
+        self._graph = plt.plot(self.losses)[0]
+        plt.pause(1)
 
-        super(MyPolicy, self).__init__(edge_ids, tf_ids, **kwargs)
+        super(MyPolicy, self).__init__(edge_ids=edge_ids, tf_ids=tf_ids, min_speed=min_speed, max_speed=max_speed,
+                                       **kwargs)
 
     def get_obs(self, veh_id: int) -> np.ndarray:
         car_pos = traci.vehicle.getPosition(veh_id)[0]
-        closest_red_light_tf = INF_PROX
+        closest_red_light_tf = _INF_PROX
+        time_to_next_switch = 0
         for tf_id in self.tf_ids:
             tf_pos = self.net.getNode(tf_id).getCoord()[0]
-            if tf_pos >= car_pos and traci.trafficlight.getPhase(tf_id) == RED_LIGHT_TF:
+            if tf_pos >= car_pos and traci.trafficlight.getPhase(tf_id) == 0:
+                time_to_next_switch = traci.trafficlight.getNextSwitch(tf_id) - traci.simulation.getTime()
                 closest_red_light_tf = min(closest_red_light_tf, tf_pos - car_pos)
-        return np.array([closest_red_light_tf])
+        return np.array([time_to_next_switch, closest_red_light_tf])
 
     def get_total_fuel_cons(self, veh_id: int):
-        return -self.fuel_metric._vehicleIdFuelDict[veh_id]
+        return self.fuel_metric._vehicleIdFuelDict[veh_id]
 
     def get_rew(self, veh_id: int):
         return -(self.get_total_fuel_cons(veh_id) - self.prev_fuel[veh_id])
 
     def step(self, t=0):
-        if len(self.prev_obs) != 0:
+        # finishing previous transitions
+        self.losses = 0
+        cnt = 0
+        cumulative_reward = 0
+        rewardee_cnt = 0
+        if len(self.prev_states) != 0:
             for edgeID in self.edge_ids:
                 for vehicleID in traci.edge.getLastStepVehicleIDs(edgeID):
                     if traci.vehicle.getTypeID(vehicleID) == "connected":
-                        if vehicleID in self.prev_obs and vehicleID in self.prev_actions and vehicleID in self.prev_fuel:
+                        if vehicleID in self.prev_states and vehicleID in self.prev_actions and vehicleID in self.prev_fuel:
                             obs = self.get_obs(vehicleID)
                             reward = self.get_rew(vehicleID)
-                            self.agent.collect_experience(
-                                [self.prev_obs[vehicleID], self.prev_actions[vehicleID].item(), reward, obs])
-                            self.rew.append(reward)
-                            self.prev_fuel[vehicleID] = self.get_total_fuel_cons(vehicleID)
 
-            self.index += 1
-            if self.index > 128:
-                self.index = 0
-                for j in range(4):
-                    loss = self.agent.train(batch_size=16)
-                    self.losses += loss
+                            transition = (self.prev_states[vehicleID], self.prev_actions[vehicleID], obs, reward, 0)
 
+                            rewardee_cnt += 1
+                            cumulative_reward += reward
+
+                            if self._step_count < self._initial_steps_count:
+                                self.agent.consume_transition(
+                                    transition
+                                )
+
+                                # self.rewards.append(reward)
+                                self.prev_fuel[vehicleID] = self.get_total_fuel_cons(vehicleID)
+                            else:
+                                loss = self.agent.update(transition)
+                                if loss and not self.is_exploration[vehicleID]:
+                                    cnt += 1
+                                    self.losses += loss
+        if rewardee_cnt != 0:
+            self.rewards.append(cumulative_reward / rewardee_cnt)
+
+        if cnt != 0:
+            # print(self.losses / cnt)
+            self.losses_list += [self.losses / cnt]
+
+            self._graph.remove()
+
+            self._graph = plt.plot(self.losses_list)[0]
+
+        # doing new transitions
         for edgeID in self.edge_ids:
             for vehicleID in traci.edge.getLastStepVehicleIDs(edgeID):
                 if traci.vehicle.getTypeID(vehicleID) == "connected":
-                    obs = self.get_obs(vehicleID)
-                    action = self.agent.get_action(obs, POLICY_MAX_SPEED - POLICY_MIN_SPEED, self.epsilon)
+                    state = self.get_obs(vehicleID)
 
+                    exploration = random.random() < self.eps
+
+                    action: int = self.agent.act(np.array(state)) if not exploration else random.randint(0, self._max_speed - self._min_speed)
+
+                    self.is_exploration[vehicleID] = exploration
                     self.prev_actions[vehicleID] = action
-                    self.prev_obs[vehicleID] = obs
-                    action += POLICY_MIN_SPEED
-                    self.apply_action(vehicleID, max(min(POLICY_MAX_SPEED, action.item()), POLICY_MIN_SPEED))
+                    self.prev_states[vehicleID] = state
+
+                    self.apply_action(vehicleID, self._min_speed + action)
+
                     try:
                         self.prev_fuel[vehicleID] = self.get_total_fuel_cons(vehicleID)
                     except KeyError:
                         self.prev_fuel[vehicleID] = 0
+        self._step_count += 1
+
+
 
         return super().step(t)

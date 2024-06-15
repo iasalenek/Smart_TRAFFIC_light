@@ -4,6 +4,7 @@ import os
 import random
 import sys
 
+import matplotlib.pyplot as plt
 import sumolib
 import traci
 
@@ -14,10 +15,10 @@ CONFIG_PATH = "nets/single_agent/500m/config.sumocfg"
 SIM_TIME = 1 * 60 * 60
 P_VEHICLE = 0.3
 P_CONNECTED = 0.2
-MIN_SPEED = 30
+MIN_SPEED = 15
 MAX_SPEED = 60
 
-STEP_LENGTH = 1
+STEP_LENGTH = 5
 EDGE_IDS = ["E1"]
 TRAFFIC_LIGTS = ["J2"]
 VEHICLETYPE_IDS = ["ordinary", "connected"]
@@ -89,9 +90,7 @@ def runSimulation(
     random.seed(randomSeed)
 
     for _ in range(simTime // STEP_LENGTH):
-
         if random.random() < pVehicle * stepLength:
-
             if random.random() < pConnected:
                 traci.vehicle.add(
                     vehID=veh_id, routeID="r_0", departLane="best", typeID="connected"
@@ -110,6 +109,18 @@ def runSimulation(
 
     traci.close()
 
+    print(len(policyListner.losses_list))
+    print(min(policyListner.rewards), max(policyListner.rewards))
+    plt.plot(policyListner.rewards[::120])
+    plt.title("reward")
+
+    # plt.ylim(bottom=0, top=0.5)
+    # plt.xlabel("Индекс")
+    # plt.ylabel("Значение")
+    plt.ylim([min(policyListner.rewards[::120]), max(policyListner.rewards[::120])])
+    plt.savefig('res.png')
+    plt.show()
+
     return metricsListners
 
 
@@ -119,8 +130,13 @@ if __name__ == "__main__":
 
     metricsListners = runSimulation(
         policyListner=MyPolicy,
+        policyOptions={'net': net,
+                       'step_length': STEP_LENGTH,
+                       'min_speed': MIN_SPEED,
+                       'max_speed': MAX_SPEED,
+                       'initial_steps_count': 1,
+                       },
         # policyListner=FixedSpeedPolicy,
-        policyOptions={'net': net, 'step_length': STEP_LENGTH},
         # policyOptions={'speed': 30},
     )
 
