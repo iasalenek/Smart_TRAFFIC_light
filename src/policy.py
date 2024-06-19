@@ -131,7 +131,7 @@ class SumoEnv(gym.Env):
                     raise Exception("weird color")  # potentially a light can be off ('O')
                     # or in a lowercase color (r g y)
 
-                remaining_time = traci.trafficlight.getNextSwitch(tlsID)
+                remaining_time = traci.trafficlight.getNextSwitch(tlsID) - traci.simulation.getTime()
             else:
                 color_state = 0
                 remaining_time = 0
