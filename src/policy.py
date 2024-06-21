@@ -64,11 +64,12 @@ class SumoEnv(gym.Env):
         self.lane_length = traci.lane.getLength(self.edgeID + '_0')
 
         self.number_of_fragments = ceil(self.lane_length / self.vehicleLength)
-        # self.fractions = [self.edgeVector * self.frac * i for i in range(1, ceil(self.lane_length/self.vehicleLength))]
+        # self.fractions = [self.edgeVector * self.frac * i for i in range(1,
+        # ceil(self.lane_length/self.vehicleLength))]
 
-        #color_state for the nearest light ohe hot encoded, its time before the next color_state, distance, distance for the nearest car
-        #and two flags if there is an upcoming light or a leading car ahead.
-        #I want to count accelerated fuel consumption on a current edge as a reward. (with a '-')
+        # color_state for the nearest light ohe hot encoded, its time before the next color_state, distance,
+        # distance for the nearest car and two flags if there is an upcoming light or a leading car ahead. I want to
+        # count accelerated fuel consumption on a current edge as a reward. (with a '-')
         self.obs_dim = 6 + 2 * self.number_of_fragments * self.lanes_number
 
 
@@ -181,16 +182,20 @@ class ReplayMemory(object):
 
     def __init__(self, capacity):
         self.memory = deque([], maxlen=capacity)
-
-    def push(self, *args):
-        """Save a transition"""
-        self.memory.append(Transition(*args))
+    def push(self, timestamp_array):
+        """Save a transitions for one timestamp"""
+        tmp_buf = []
+        for obs in timestamp_array:
+            tmp_buf.append(Transition(*obs))
+        self.memory.append(tmp_buf)
 
     def sample(self, batch_size):
         return random.sample(self.memory, batch_size)
 
     def __len__(self):
         return len(self.memory)
+
+
 
 
 class BasePolicy(StepListener):

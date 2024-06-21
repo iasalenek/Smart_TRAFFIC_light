@@ -13,6 +13,8 @@ import traci
 import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 
+import src.policy
+
 loss_values = []
 
 writer = SummaryWriter(log_dir='logs')
@@ -29,7 +31,6 @@ if "SUMO_HOME" in os.environ:
     sys.path.append(tools)
 else:
     sys.exit("please declare environment variable 'SUMO_HOME'")
-
 
 steps_done = 0
 last_optimization = 10
@@ -86,16 +87,21 @@ def runSimulation(
 
     def optimize_model():
         global last_optimization
-        if len(memory) < BATCH_SIZE:
+        if len(memory) < BATCH_SIZE:  # number of connected cars is often >= 3:
             return
+
         if last_optimization < OPTIMIZATION_FREQUENCY:
             last_optimization += 1
             return
         last_optimization = 0
-        transitions = memory.sample(BATCH_SIZE)
+        transitions_with_timestamp = memory.sample(BATCH_SIZE)
         # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
         # detailed explanation). This converts batch-array of Transitions
         # to Transition of batch-arrays.
+
+        sizes = list(map(lambda x: len(x), transitions_with_timestamp))
+        transitions = ([item for sublist in transitions_with_timestamp for item in sublist])
+
         batch = Transition(*zip(*transitions))
 
         # Compute a mask of non-final states and concatenate the batch elements
@@ -103,9 +109,9 @@ def runSimulation(
         non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
                                                 batch.next_state)), device=device, dtype=torch.bool)
 
-        #TODO
+        # TODO
         non_final_next_states = torch.tensor(np.array([s for s in batch.next_state
-                                                if s is not None]))
+                                                       if s is not None]))
         state_batch = torch.tensor(np.array(batch.state))
         action_batch = torch.tensor(tuple(arr.reshape(1).to(torch.int64) for arr in batch.action))
         reward_batch = torch.tensor(batch.reward)
@@ -119,17 +125,33 @@ def runSimulation(
         # on the "older" target_net; selecting their best reward with max(1).values
         # This is merged based on the mask, such that we'll have either the expected
         # state value or 0 in case the state was final.
-        next_state_values = torch.zeros(BATCH_SIZE, device=device)
+        next_state_values = torch.zeros(len(transitions), device=device)
         with torch.no_grad():
             next_state_values[non_final_mask] = target_net(non_final_next_states).max(1).values
         # Compute the expected Q values
         expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
+        state_action_values = torch.split(state_action_values, sizes)
+        expected_state_action_values = torch.split(expected_state_action_values, sizes)
+
+        summed_state_action_values = []
+        summed_expected_state_action_values = []
+
+        for arr in state_action_values:
+            summed_state_action_values.append(torch.sum(arr, dim=0))
+        for arr in expected_state_action_values:
+            summed_expected_state_action_values.append(torch.sum(arr, dim=0))
+
+        summed_state_action_values = torch.concat(summed_state_action_values)
+
+        # print(summed_state_action_values)
+        # print(summed_expected_state_action_values)
+        summed_expected_state_action_values = torch.tensor(summed_expected_state_action_values)
+
         # Compute Huber loss
         criterion = nn.SmoothL1Loss()
-        loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
-        # loss_values.append(loss.item())
-        # print(loss.item())
+        loss = criterion(summed_state_action_values.unsqueeze(1), summed_expected_state_action_values.unsqueeze(1))
+
         # Optimize the model
         optimizer.zero_grad()
         loss.backward()
@@ -137,11 +159,6 @@ def runSimulation(
         torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
         optimizer.step()
 
-    # if policyListner is not None:
-    #     policyListner = policyListner(
-    #         edgeIDs=edgeIDs,
-    #         trafficlightIDs=trafficlightIDs,
-    #     )
     traci.start(sumoCmd)
     metrics = []
     envs = []
@@ -165,7 +182,7 @@ def runSimulation(
     else:
         num_episodes = 600
 
-    seeds = [randomSeed+i+1 for i in range(num_episodes)]
+    seeds = [randomSeed + i + 1 for i in range(num_episodes)]
     traci.close()  # needed to start traci for constants initialization
     last_action_dict = dict()
     for ind in range(num_episodes):
@@ -186,8 +203,10 @@ def runSimulation(
         veh_id = 0
         if ind % 10 != 0:
             random.seed(seeds[ind])
+            simTime = SIM_TIME
         else:
             random.seed(randomSeed)
+            simTime = 1 * 5 * 60  # change evaluation time if necessary
         state = []
         for i in range(len(envs)):
             st, _ = envs[i].reset()
@@ -218,31 +237,32 @@ def runSimulation(
 
             # next_random_state = random.getstate()
 
-            stepVehicles = traci.vehicle.getIDList()
             for k in range(len(envs)):
                 action = dict()
 
                 for car_id, obs in state[k].items():
                     if obs is not None:
-                        if ind % 10 != 0: # evaluation
+                        if ind % 10 != 0:  # evaluation
                             action[car_id] = select_action(obs)
                         else:
                             action[car_id] = select_action(obs, True)
                         int_action = int(action[car_id].item())
                         action_dict[int_action] = action_dict.get(int_action, 0) + 1
 
-
                 next_state, reward, done, _ = envs[k].step(action)
                 rewards = list(filter(lambda x: x is not None, list(reward.values())))
                 reward_sum += np.sum(np.array(rewards))
+                timestamp_array = []
                 for car_id, obs in state[k].items():
                     if not done[car_id]:
                         rew = torch.tensor([reward[car_id]], device=device)
-                        memory.push(obs, action[car_id], next_state[car_id], rew)
+                        timestamp_array.append([obs, action[car_id], next_state[car_id], rew])
+                        # memory.push(obs, action[car_id], next_state[car_id], rew)
                     else:
                         # memory.push(obs, None, None, 0) #TODO
                         ...
                 # reward = torch.tensor([reward], device=device)
+                memory.push(timestamp_array)
                 state[k] = {k: v for k, v in next_state.items() if v is not None}
             if ind % 10 != 0:
                 optimize_model()
