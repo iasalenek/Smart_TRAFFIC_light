@@ -75,11 +75,7 @@ def runSimulation(
                         math.exp(-1. * steps_done / EPS_DECAY)
         if sample > eps_threshold or eval:
             with torch.no_grad():
-                # t.max(1) will return the largest column value of each row.
-                # second column on max result is index of where max element was
-                # found, so we pick action with the larger expected reward.
-                # return policy_net(state).max(1).indices.view(1, 1) //TODO
-                # print(policy_net(torch.from_numpy(state)).max(-1).indices.item() == torch.argmax(policy_net(torch.from_numpy(state))))
+                # we pick action with the larger expected reward.
                 return torch.argmax(policy_net(torch.from_numpy(state)))
 
         else:
@@ -87,7 +83,7 @@ def runSimulation(
 
     def optimize_model():
         global last_optimization
-        if len(memory) < BATCH_SIZE:  # number of connected cars is often >= 3:
+        if len(memory) < BATCH_SIZE:
             return
 
         if last_optimization < OPTIMIZATION_FREQUENCY:
@@ -108,13 +104,12 @@ def runSimulation(
         # (a final state would've been the one after which simulation ended)
         non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
                                                 batch.next_state)), device=device, dtype=torch.bool)
-
-        # TODO
         non_final_next_states = torch.tensor(np.array([s for s in batch.next_state
                                                        if s is not None]))
         state_batch = torch.tensor(np.array(batch.state))
         action_batch = torch.tensor(tuple(arr.reshape(1).to(torch.int64) for arr in batch.action))
         reward_batch = torch.tensor(batch.reward)
+
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
         # for each batch state according to policy_net
@@ -144,8 +139,6 @@ def runSimulation(
 
         summed_state_action_values = torch.concat(summed_state_action_values)
 
-        # print(summed_state_action_values)
-        # print(summed_expected_state_action_values)
         summed_expected_state_action_values = torch.tensor(summed_expected_state_action_values)
 
         # Compute Huber loss
@@ -196,7 +189,6 @@ def runSimulation(
                 MeanEdgeFuelConsumption(edgeID=edgeID, vehicletypeIDs=vehicletypeIDs),
             ]
 
-        # traci.addStepListener(policyListner)
         for metricListner in metricsListners:
             traci.addStepListener(metricListner)
 
@@ -212,12 +204,7 @@ def runSimulation(
             st, _ = envs[i].reset()
             state.append(st)
 
-        # next_random_state = None
-
         for _ in range(simTime // STEP_LENGTH):
-
-            # if next_random_state is not None:
-            #     random.setstate(next_random_state)
 
             if random.random() < pVehicle * stepLength:
 
@@ -235,8 +222,6 @@ def runSimulation(
                 )
                 veh_id += 1
 
-            # next_random_state = random.getstate()
-
             for k in range(len(envs)):
                 action = dict()
 
@@ -245,7 +230,7 @@ def runSimulation(
                         if ind % 10 != 0:  # evaluation
                             action[car_id] = select_action(obs)
                         else:
-                            action[car_id] = select_action(obs, True)
+                            action[car_id] = select_action(obs, eval=True)
                         int_action = int(action[car_id].item())
                         action_dict[int_action] = action_dict.get(int_action, 0) + 1
 
@@ -257,11 +242,6 @@ def runSimulation(
                     if not done[car_id]:
                         rew = torch.tensor([reward[car_id]], device=device)
                         timestamp_array.append([obs, action[car_id], next_state[car_id], rew])
-                        # memory.push(obs, action[car_id], next_state[car_id], rew)
-                    else:
-                        # memory.push(obs, None, None, 0) #TODO
-                        ...
-                # reward = torch.tensor([reward], device=device)
                 memory.push(timestamp_array)
                 state[k] = {k: v for k, v in next_state.items() if v is not None}
             if ind % 10 != 0:
@@ -277,7 +257,6 @@ def runSimulation(
 
         print(f"Episode {ind} is finished!")
         if ind % 10 == 0:
-            # loss_values.append(reward_sum / (simTime // STEP_LENGTH))
             writer.add_scalar(str(pConnected) + '/Reward/evaluation', reward_sum / (simTime // STEP_LENGTH), ind)
         else:
             writer.add_scalar(str(pConnected) + '/Reward/learning', reward_sum / (simTime // STEP_LENGTH), ind)
