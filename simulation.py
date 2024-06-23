@@ -25,6 +25,7 @@ VEHICLETYPE_IDS = ["ordinary", "connected"]
 RANDOM_SEED = 42
 SUMO_SEED = 42
 USE_GUI = True
+GLOSA_RANGE = 0
 
 if "SUMO_HOME" in os.environ:
     tools = os.path.join(os.environ["SUMO_HOME"], "tools")
@@ -49,7 +50,7 @@ def runSimulation(
     randomSeed: int = RANDOM_SEED,
     sumoSeed: int = SUMO_SEED,
     useGUI: bool = USE_GUI,
-    GLOSARange: int = 0,
+    glosaRange: int = GLOSA_RANGE,
 ):
 
     if useGUI:
@@ -65,7 +66,7 @@ def runSimulation(
         "--quit-on-end",
         "--seed", str(sumoSeed),
         "--time-to-teleport", "-1",  # Телепортация автомобилей отключена
-        "--device.glosa.range", str(GLOSARange),
+        "--device.glosa.range", str(glosaRange),
     ]
 
     traci.start(sumoCmd)
