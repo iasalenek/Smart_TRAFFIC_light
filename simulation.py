@@ -67,11 +67,12 @@ def runSimulation(
         "--quit-on-end",
         "--seed", str(sumoSeed),
         "--time-to-teleport", "-1",  # Телепортация автомобилей отключена
+        "--device.glosa.range", "0",
     ]
 
     traci.start(sumoCmd)
 
-    # # Set GLOSA
+    # Set GLOSA
     for tlID in trafficlightIDs:
         traci.trafficlight.setParameter(tlID, "device.glosa.range", str(glosaRange))
 
