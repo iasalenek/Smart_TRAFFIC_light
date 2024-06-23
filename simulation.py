@@ -49,6 +49,7 @@ def runSimulation(
     randomSeed: int = RANDOM_SEED,
     sumoSeed: int = SUMO_SEED,
     useGUI: bool = USE_GUI,
+    GLOSARange: int = 0,
 ):
 
     if useGUI:
@@ -64,6 +65,7 @@ def runSimulation(
         "--quit-on-end",
         "--seed", str(sumoSeed),
         "--time-to-teleport", "-1",  # Телепортация автомобилей отключена
+        "--device.glosa.range", str(GLOSARange),
     ]
 
     traci.start(sumoCmd)
