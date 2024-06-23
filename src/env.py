@@ -13,7 +13,7 @@ from gymnasium import Env, spaces
 
 _INF_PROX = 2000
 CONFIG_PATH = "nets/single_agent/500m/config.sumocfg"
-SIM_TIME = 1 * 60 * 60
+SIM_TIME = 1 * 60 * 5
 P_VEHICLE = 0.3
 P_CONNECTED = 0.2
 MIN_SPEED = 15
@@ -60,7 +60,7 @@ class RoadSimulationEnv(Env):
         self.p_vehicle = p_vehicle
         self.p_connected = p_connected
         self.actionable_veh_id = -1
-        self.fuel_cons_of_actionable_veh = -1
+        self.fuel_cons_of_actionable_veh = {edge_id: 0 for edge_id in self.edge_ids}
         self.edge_id_of_actionable_veh = ''
 
         self.action_space = spaces.Discrete(self.max_speed - self.min_speed)
@@ -105,12 +105,12 @@ class RoadSimulationEnv(Env):
         self._traci_setup()
 
         while True:
-            is_connected = False
             if random.random() < self.p_vehicle * self.step_length:
                 is_connected = random.random() < self.p_connected
 
                 traci.vehicle.add(
-                    vehID=self.veh_id, routeID="r_0", departLane="best", typeID="connected" if is_connected else "ordinary"
+                    vehID=self.veh_id, routeID="r_0", departLane="best",
+                    typeID="connected" if is_connected else "ordinary"
                 )
 
                 traci.vehicle.setSpeed(
@@ -121,7 +121,12 @@ class RoadSimulationEnv(Env):
 
             traci.simulationStep()
 
-            if is_connected:
+            found = False
+            for edge_id in self.edge_ids:
+                for vehicleID in traci.edge.getLastStepVehicleIDs(edge_id):
+                    if traci.vehicle.getTypeID(vehicleID) == "connected":
+                        found = True
+            if found:
                 break
 
         connected_vehs = []
@@ -130,10 +135,16 @@ class RoadSimulationEnv(Env):
                 if traci.vehicle.getTypeID(vehicleID) == "connected":
                     connected_vehs.append((vehicleID, edge_id))
 
+        if len(connected_vehs) == 0:
+            print("No connected vehicles found")
+            return None
+
         veh = random.choice(connected_vehs)
         self.actionable_veh_id = veh[0]
         self.edge_id_of_actionable_veh = veh[1]
-        self.fuel_cons_of_actionable_veh = self.get_total_fuel_cons(self.edge_id_of_actionable_veh, self.actionable_veh_id)
+        self.fuel_cons_of_actionable_veh = {
+            edge_id: self._get_fuel_consumption(edge_id, self.actionable_veh_id) for edge_id in self.edge_ids
+        }
         obs = self._get_obs(self.actionable_veh_id)
         return obs, {}
 
@@ -148,16 +159,26 @@ class RoadSimulationEnv(Env):
                 closest_red_light_tf = min(closest_red_light_tf, tf_pos - car_pos)
         return np.array([time_to_next_switch, closest_red_light_tf])
 
-    def get_total_fuel_cons(self, edge_id: str, veh_id: int):
-        total = 0
-        for edge_id in self.edge_ids:
-            if veh_id in self.metrics_listeners[edge_id]['fuel']._vehicleIdFuelDict:
-                total += self.metrics_listeners[edge_id]['fuel']._vehicleIdFuelDict[veh_id]
-        return total
+    def _get_fuel_consumption(self, edge_id: str, veh_id: int):
+        if veh_id in self.metrics_listeners[edge_id]['fuel']._vehicleIdFuelDict:
+            return self.metrics_listeners[edge_id]['fuel']._vehicleIdFuelDict[veh_id]
+        return 0
 
     def _get_reward(self):
-        return -(self.get_total_fuel_cons(self.edge_id_of_actionable_veh,
-                                          self.actionable_veh_id) - self.fuel_cons_of_actionable_veh)
+        cur_fuel_cons = {
+            edge_id: self._get_fuel_consumption(edge_id, self.actionable_veh_id) for edge_id in self.edge_ids
+        }
+
+        delta = 0
+        for edge_id in self.edge_ids:
+            prev, cur = self.fuel_cons_of_actionable_veh[edge_id], cur_fuel_cons[edge_id]
+
+            if cur > prev:
+                delta += cur - prev
+
+        assert delta >= 0
+
+        return -delta
 
     def step(self, action: int):
         action += self.min_speed
@@ -197,8 +218,13 @@ class RoadSimulationEnv(Env):
                     connected_vehs.append((vehicleID, edge_id))
         veh = random.choice(connected_vehs)
         self.actionable_veh_id = veh[0]
+
         self.edge_id_of_actionable_veh = veh[1]
-        self.fuel_cons_of_actionable_veh = self.get_total_fuel_cons(self.edge_id_of_actionable_veh, self.actionable_veh_id)
+
+        self.fuel_cons_of_actionable_veh = {
+            edge_id: self._get_fuel_consumption(edge_id, self.actionable_veh_id) for edge_id in self.edge_ids
+        }
+
         obs = self._get_obs(self.actionable_veh_id)
 
         assert obs.size != 0
@@ -207,7 +233,6 @@ class RoadSimulationEnv(Env):
         truncated = False
 
         self.cur_step += 1
-
 
         return obs, reward, terminated, truncated, {}
 

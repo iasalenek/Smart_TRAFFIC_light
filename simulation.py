@@ -20,14 +20,8 @@ from src.env import RoadSimulationEnv
 
 from src.dqn import DQN
 
-GAMMA = 0.99
-INITIAL_STEPS = 1024
+INITIAL_STEPS = 1000
 TRANSITIONS = 500000
-STEPS_PER_UPDATE = 1
-STEPS_PER_TARGET_UPDATE = STEPS_PER_UPDATE * 200
-BATCH_SIZE = 1
-LEARNING_RATE = 5e-4
-DEVICE = 'cpu'
 
 if "SUMO_HOME" in os.environ:
     tools = os.path.join(os.environ["SUMO_HOME"], "tools")
@@ -35,26 +29,28 @@ if "SUMO_HOME" in os.environ:
 else:
     sys.exit("please declare environment variable 'SUMO_HOME'")
 
+
 def evaluate_policy(env, agent, episodes=1):
-    returns = []
     speeds = []
-    for _ in range(episodes):
+    rewards = []
+    for i in range(episodes):
         done = False
+        random.seed(42 + i)
         state = env.reset()[0]
-        total_reward = 0.
 
         while not done:
             action = agent.act(state)
-            speeds.append(action)
             state, reward, done, _, _ = env.step(action)
-            total_reward += reward
-        returns.append(total_reward)
-    return returns, sum(speeds) / len(speeds) + 15
+            speeds.append(action)
+            rewards.append(reward)
+
+    return sum(rewards) / len(rewards), sum(speeds) / len(speeds) + 15
+
 
 if __name__ == "__main__":
     net = sumolib.net.readNet('./nets/single_agent/500m/net.xml')
 
-    env = RoadSimulationEnv(net, sim_time=1000, use_gui=False)
+    env = RoadSimulationEnv(net, sim_time=300, use_gui=False)
 
     dqn = DQN(state_dim=env.observation_space.shape[0], action_dim=env.action_space.n)
     eps = 0.1
@@ -71,13 +67,14 @@ if __name__ == "__main__":
 
     i = 0
 
-    epoch_count = 200
+    epoch_count = 100
     epoch_size = TRANSITIONS // epoch_count
 
     speeds = []
     res = []
     for i in range(epoch_count):
-        print("epoch #", epoch_count)
+        random.seed()
+        print("epoch #", i)
         for _ in tqdm.tqdm(range(epoch_size), total=epoch_size):
             # Epsilon-greedy policy
             if random.random() < eps:
@@ -90,8 +87,9 @@ if __name__ == "__main__":
 
             state = next_state if not done else env.reset()[0]
 
-        rewards, speed = evaluate_policy(env, dqn, 1)
-        res.append(rewards[0])
+        reward, speed = evaluate_policy(env, dqn, 3)
+        print("eval episode 1: rew:", reward, "speed:", speed)
+        res.append(reward)
         speeds.append(speed)
 
         figure, axis = plt.subplots(1, 2)
@@ -100,6 +98,11 @@ if __name__ == "__main__":
 
         plt.show()
         plt.savefig('res.png')
+
+        if i % 10 == 0:
+            dqn.save()
+
+    dqn.save()
 
     for metricListner in env.metrics_listeners:
         print(metricListner)

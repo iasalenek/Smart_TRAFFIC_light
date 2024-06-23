@@ -8,10 +8,8 @@ from collections import deque
 import random
 
 GAMMA = 0.99
-INITIAL_STEPS = 1024
-TRANSITIONS = 500000
 STEPS_PER_UPDATE = 1
-STEPS_PER_TARGET_UPDATE = STEPS_PER_UPDATE * 1000
+STEPS_PER_TARGET_UPDATE = STEPS_PER_UPDATE * 300
 BATCH_SIZE = 1
 LEARNING_RATE = 5e-4
 DEVICE = 'mps'
@@ -89,7 +87,6 @@ class DQN:
             return np.argmax(action_values.cpu().data.numpy())
 
     def update(self, transition):
-        # You don't need to change this
         self.consume_transition(transition)
         loss = None
         if self.steps % STEPS_PER_UPDATE == 0:
@@ -102,34 +99,3 @@ class DQN:
 
     def save(self):
         torch.save(self.model, "agent.pkl")
-
-if __name__ == "__main__":
-    env = make("LunarLander-v2")
-
-    dqn = DQN(state_dim=env.observation_space.shape[0], action_dim=env.action_space.n)
-    eps = 0.1
-    state = env.reset()[0]
-
-    for _ in range(INITIAL_STEPS):
-        action = env.action_space.sample()
-
-        next_state, reward, done, _, _ = env.step(action)
-        dqn.consume_transition((state, action, next_state, reward, done))
-
-        state = next_state if not done else env.reset()[0]
-
-    for i in range(TRANSITIONS):
-        # Epsilon-greedy policy
-        if random.random() < eps:
-            action = env.action_space.sample()
-        else:
-            action = dqn.act(state)
-
-        next_state, reward, done, _, _ = env.step(action)
-        dqn.update((state, action, next_state, reward, done))
-
-        state = next_state if not done else env.reset()[0]
-
-        if (i + 1) % (TRANSITIONS // 100) == 0:
-            rewards = evaluate_policy(dqn, 5)
-            dqn.save()
