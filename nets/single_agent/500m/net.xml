@@ -61,11 +61,13 @@
     </edge>
 
     <tlLogic id="J1" type="static" programID="0" offset="0">
+        <param key="device.glosa.range" value="0"/>
         <phase duration="42" state="GG"/>
         <phase duration="3"  state="yy"/>
         <phase duration="45" state="rr"/>
     </tlLogic>
     <tlLogic id="J2" type="static" programID="0" offset="60">
+        <param key="device.glosa.range" value="0"/>
         <phase duration="42" state="GG"/>
         <phase duration="3"  state="yy"/>
         <phase duration="45" state="rr"/>

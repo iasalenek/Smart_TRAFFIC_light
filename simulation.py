@@ -27,6 +27,7 @@ SUMO_SEED = 42
 USE_GUI = True
 GLOSA_RANGE = 0
 
+
 if "SUMO_HOME" in os.environ:
     tools = os.path.join(os.environ["SUMO_HOME"], "tools")
     sys.path.append(tools)
@@ -45,7 +46,7 @@ def runSimulation(
     maxSpeed: float = MAX_SPEED,
     stepLength: float = STEP_LENGTH,
     edgeIDs: List[str] = EDGE_IDS,
-    trafficlightIDs: Optional[List[str]] = None,
+    trafficlightIDs: Optional[List[str]] = TRAFFIC_LIGTS,
     vehicletypeIDs: Optional[List[str]] = VEHICLETYPE_IDS,
     randomSeed: int = RANDOM_SEED,
     sumoSeed: int = SUMO_SEED,
@@ -66,10 +67,13 @@ def runSimulation(
         "--quit-on-end",
         "--seed", str(sumoSeed),
         "--time-to-teleport", "-1",  # Телепортация автомобилей отключена
-        "--device.glosa.range", str(glosaRange),
     ]
 
     traci.start(sumoCmd)
+
+    # # Set GLOSA
+    for tlID in trafficlightIDs:
+        traci.trafficlight.setParameter(tlID, "device.glosa.range", str(glosaRange))
 
     if policyListner is not None:
         policyListner = policyListner(
