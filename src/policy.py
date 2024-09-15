@@ -11,14 +11,11 @@ from typing import Dict
 
 import numpy as np
 import matplotlib.pyplot as plt
-import torch
 
 import time
 
-from src.dqn import DQN
+from stable_baselines3.dqn import DQN
 from src.metrics import MeanEdgeFuelConsumption
-
-
 
 class BasePolicy(StepListener):
     def __init__(
