@@ -26,6 +26,7 @@ VEHICLETYPE_IDS = ["ordinary", "connected"]
 RANDOM_SEED = 42
 SUMO_SEED = 42
 USE_GUI = True
+GLOSA_RANGE = 0
 
 
 class RoadSimulationEnv(Env):
@@ -44,6 +45,7 @@ class RoadSimulationEnv(Env):
                  random_seed: int = RANDOM_SEED,
                  sumo_seed: int = SUMO_SEED,
                  use_gui: bool = USE_GUI,
+                 glosa_range: int = GLOSA_RANGE,
                  ):
         super(RoadSimulationEnv, self).__init__()
 
@@ -62,6 +64,7 @@ class RoadSimulationEnv(Env):
         self.actionable_veh_id = -1
         self.fuel_cons_of_actionable_veh = {edge_id: 0 for edge_id in self.edge_ids}
         self.edge_id_of_actionable_veh = ''
+        self._glosa_range = glosa_range
 
         self.action_space = spaces.Discrete(self.max_speed - self.min_speed)
 
@@ -77,6 +80,7 @@ class RoadSimulationEnv(Env):
             "--quit-on-end",
             "--seed", str(sumo_seed),
             "--time-to-teleport", "-1",  # Телепортация автомобилей отключена
+            "--device.glosa.range", str(self._glosa_range),
         ]
 
         random.seed(random_seed)
@@ -104,30 +108,7 @@ class RoadSimulationEnv(Env):
         self.cur_step = 0
         self._traci_setup()
 
-        while True:
-            if random.random() < self.p_vehicle * self.step_length:
-                is_connected = random.random() < self.p_connected
-
-                traci.vehicle.add(
-                    vehID=self.veh_id, routeID="r_0", departLane="best",
-                    typeID="connected" if is_connected else "ordinary"
-                )
-
-                traci.vehicle.setSpeed(
-                    vehID=self.veh_id, speed=random.randint(self.min_speed, self.max_speed) / 3.6
-                )
-
-                self.veh_id += 1
-
-            traci.simulationStep()
-
-            found = False
-            for edge_id in self.edge_ids:
-                for vehicleID in traci.edge.getLastStepVehicleIDs(edge_id):
-                    if traci.vehicle.getTypeID(vehicleID) == "connected":
-                        found = True
-            if found:
-                break
+        self._spawn_till_connected()
 
         connected_vehs = []
         for edge_id in self.edge_ids:
@@ -180,6 +161,61 @@ class RoadSimulationEnv(Env):
 
         return -delta
 
+    def get_total_fuel(self):
+        fuel_cons = {
+            "connected": 0,
+            "ordinary": 0,
+            "All": 0,
+        }
+        for edge_id in self.edge_ids:
+            cur = self.metrics_listeners[edge_id]["fuel"].get_mean_fuel()
+            fuel_cons["connected"] += cur["connected"]
+            fuel_cons["ordinary"] += cur["ordinary"]
+            fuel_cons["All"] += cur["All"]
+
+        fuel_cons["connected"] /= len(self.edge_ids)
+        fuel_cons["ordinary"] /= len(self.edge_ids)
+        fuel_cons["All"] /= len(self.edge_ids)
+        return fuel_cons
+
+    def step_all(self, actions: List[int]):
+        for action in actions:
+            action += self.min_speed
+            action = min(action, self.max_speed)
+            action = max(action, self.min_speed)
+            assert (
+                    traci.vehicle.getTypeID(self.actionable_veh_id) == "connected"
+            ), f"vehicle {self.actionable_veh_id} is not connected"
+
+            traci.vehicle.setSpeed(vehID=self.actionable_veh_id, speed=action / 3.6)
+
+
+    def _spawn_till_connected(self):
+        while True:
+            if random.random() < self.p_vehicle * self.step_length:
+                is_connected = random.random() < self.p_connected
+
+                traci.vehicle.add(
+                    vehID=self.veh_id, routeID="r_0", departLane="best",
+                    typeID="connected" if is_connected else "ordinary"
+                )
+
+                traci.vehicle.setSpeed(
+                    vehID=self.veh_id, speed=random.randint(self.min_speed, self.max_speed) / 3.6
+                )
+
+                self.veh_id += 1
+
+            traci.simulationStep()
+
+            found = False
+            for edge_id in self.edge_ids:
+                for vehicleID in traci.edge.getLastStepVehicleIDs(edge_id):
+                    if traci.vehicle.getTypeID(vehicleID) == "connected":
+                        found = True
+            if found:
+                return
+
     def step(self, action: int):
         action += self.min_speed
         action = min(action, self.max_speed)
@@ -187,27 +223,9 @@ class RoadSimulationEnv(Env):
         assert (
                 traci.vehicle.getTypeID(self.actionable_veh_id) == "connected"
         ), f"vehicle {self.actionable_veh_id} is not connected"
-        assert (action >= self.min_speed) and (
-                action <= self.max_speed
-        ), "The speed is beyond the limit"
         traci.vehicle.setSpeed(vehID=self.actionable_veh_id, speed=action / 3.6)
 
-        if random.random() < self.p_vehicle * self.step_length:
-            if random.random() < self.p_connected:
-                traci.vehicle.add(
-                    vehID=self.veh_id, routeID="r_0", departLane="best", typeID="connected"
-                )
-            else:
-                traci.vehicle.add(
-                    vehID=self.veh_id, routeID="r_0", departLane="best", typeID="ordinary"
-                )
-
-            traci.vehicle.setSpeed(
-                vehID=self.veh_id, speed=random.randint(self.min_speed, self.max_speed) / 3.6
-            )
-            self.veh_id += 1
-
-        traci.simulationStep()
+        self._spawn_till_connected()
 
         reward = self._get_reward()
 

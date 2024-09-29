@@ -94,6 +94,10 @@ class MeanEdgeFuelConsumption(EdgeMetric):
         self.stepLength = traci.simulation.getDeltaT()
         traci.edge.subscribe(self.edgeID, varIDs=[tc.LAST_STEP_VEHICLE_ID_LIST])
 
+    def get_mean_fuel(self):
+        self.cleanUp()
+        return self.aggregatedValues
+
     def step(self, t=0):
         # Множества всех машин на ребре и машин которые въехали/выехали с ребра на этом шаге
         stepVehicleIDs = set(

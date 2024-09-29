@@ -17,6 +17,7 @@ import time
 from stable_baselines3.dqn import DQN
 from src.metrics import MeanEdgeFuelConsumption
 
+
 class BasePolicy(StepListener):
     def __init__(
             self,
@@ -60,7 +61,7 @@ class FixedSpeedPolicy(BasePolicy):
             tf_ids: Optional[List[str]] = None,
             **kwargs,
     ) -> None:
-        super(FixedSpeedPolicy, self).__init__(edge_ids, tf_ids, **kwargs)
+        super(FixedSpeedPolicy, self).__init__(edge_ids, min_speed, max_speed, tf_ids, **kwargs)
         self._min_speed = min_speed
         self._max_speed = max_speed
         assert (speed >= self._min_speed) and (speed <= self._max_speed)
@@ -188,7 +189,8 @@ class MyPolicy(BasePolicy):
 
                     exploration = random.random() < self.eps
 
-                    action: int = self.agent.act(np.array(state)) if not exploration else random.randint(0, self._max_speed - self._min_speed)
+                    action: int = self.agent.act(np.array(state)) if not exploration else random.randint(0,
+                                                                                                         self._max_speed - self._min_speed)
 
                     self.is_exploration[vehicleID] = exploration
                     self.prev_actions[vehicleID] = action
@@ -201,7 +203,5 @@ class MyPolicy(BasePolicy):
                     except KeyError:
                         self.prev_fuel[vehicleID] = 0
         self._step_count += 1
-
-
 
         return super().step(t)

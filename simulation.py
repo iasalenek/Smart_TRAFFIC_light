@@ -1,25 +1,11 @@
-from typing import List, Optional
-
 import os
 import random
 import sys
-
-import tqdm
-
-import matplotlib.pyplot as plt
-import numpy
-
-import matplotlib.pyplot as plt
 import sumolib
-import traci
-
-from src.policy import BasePolicy, FixedSpeedPolicy, MyPolicy
-from src.metrics import MeanEdgeFuelConsumption, MeanEdgeTime
-
+import src.env
 from src.env import RoadSimulationEnv
 
-from stable_baselines3.dqn import DQN
-
+GLOSA_RANGE = 0
 INITIAL_STEPS = 1000
 TRANSITIONS = 500000
 
@@ -33,6 +19,13 @@ else:
 def evaluate_policy(env, agent, episodes=1):
     speeds = []
     rewards = []
+
+    fuel = {
+        "connected": 0,
+        "ordinary": 0,
+        "All": 0,
+    }
+
     for i in range(episodes):
         done = False
         random.seed(42 + i)
@@ -44,21 +37,33 @@ def evaluate_policy(env, agent, episodes=1):
             speeds.append(action)
             rewards.append(reward)
 
-    return sum(rewards) / len(rewards), sum(speeds) / len(speeds) + 15
+        cur = env.get_total_fuel()
+        fuel["connected"] += cur["connected"]
+        fuel["ordinary"] += cur["ordinary"]
+        fuel["All"] += cur["All"]
+
+    fuel["connected"] /= episodes
+    fuel["ordinary"] /= episodes
+    fuel["All"] /= episodes
+
+    return (sum(rewards) / len(rewards),
+            sum(speeds) / len(speeds) + src.env.MIN_SPEED,
+            fuel
+            )
 
 
 class FixedPolicyAgent:
-    def __init__(self):
+    def __init__(self, speed: int, min_speed: int = 0):
+        self._speed = speed
+        self._min_speed = min_speed
         return
 
     def act(self, state) -> int:
-        return 45
+        return self._speed - self._min_speed
 
 
 if __name__ == "__main__":
     net = sumolib.net.readNet('./nets/single_agent/500m/net.xml')
-
-    env = RoadSimulationEnv(net, sim_time=300, use_gui=False)
 
     # model = DQN("MlpPolicy", env, verbose=1)
 
@@ -66,7 +71,12 @@ if __name__ == "__main__":
 
     # model.save("dqn_road_simulation")
 
-    evaluate_policy(env, FixedPolicyAgent())
+    env_with_glosa = RoadSimulationEnv(net, sim_time=1200, use_gui=False, glosa_range=10000)
+    rw_with_glosa, _, fuel_with_glosa = evaluate_policy(env_with_glosa, FixedPolicyAgent(30, src.env.MIN_SPEED), episodes=5)
+    env_with_glosa.close()
 
-    # for metricListner in env.metrics_listeners:
-    #     print(metricListner)
+    env = RoadSimulationEnv(net, sim_time=1200, use_gui=False, glosa_range=0)
+    rw_without_glosa, _, fuel_without_glosa = evaluate_policy(env, FixedPolicyAgent(30, src.env.MIN_SPEED), episodes=5)
+    print("with", rw_with_glosa, fuel_with_glosa, sep='\n')
+    print("without glosa", rw_without_glosa, fuel_without_glosa, sep='\n')
+    env.close()

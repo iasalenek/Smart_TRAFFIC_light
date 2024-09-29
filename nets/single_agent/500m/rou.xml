@@ -5,7 +5,9 @@
 
 <routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
     <!-- VTypes -->
-    <vType id="connected" color="red"/>
+    <vType id="connected" color="red">
+        <param key="has.glosa.device" value="true"/>
+    </vType>
     <vType id="ordinary" color="yellow"/>
     <!-- Routes -->
     <route id="r_0" edges="E0 E1 E2"/>
