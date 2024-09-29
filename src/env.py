@@ -29,6 +29,13 @@ USE_GUI = True
 GLOSA_RANGE = 0
 
 
+class ConnectedVehicle:
+    def __init__(self, veh_id: int, edge_id: str, fuel_cons: Dict[str, float]):
+        self.veh_id = veh_id
+        self.edge_id = edge_id
+        self.fuel_cons = fuel_cons
+
+
 class RoadSimulationEnv(Env):
     def __init__(self,
                  net: sumolib.net.Net,
@@ -61,9 +68,7 @@ class RoadSimulationEnv(Env):
         self.cur_step = 0
         self.p_vehicle = p_vehicle
         self.p_connected = p_connected
-        self.actionable_veh_id = -1
-        self.fuel_cons_of_actionable_veh = {edge_id: 0 for edge_id in self.edge_ids}
-        self.edge_id_of_actionable_veh = ''
+        self._actionable_veh: ConnectedVehicle = None
         self._glosa_range = glosa_range
 
         self.action_space = spaces.Discrete(self.max_speed - self.min_speed)
@@ -121,12 +126,11 @@ class RoadSimulationEnv(Env):
             return None
 
         veh = random.choice(connected_vehs)
-        self.actionable_veh_id = veh[0]
-        self.edge_id_of_actionable_veh = veh[1]
-        self.fuel_cons_of_actionable_veh = {
-            edge_id: self._get_fuel_consumption(edge_id, self.actionable_veh_id) for edge_id in self.edge_ids
-        }
-        obs = self._get_obs(self.actionable_veh_id)
+        self._actionable_veh = ConnectedVehicle(veh[0], veh[1], {
+            edge_id: self._get_fuel_consumption(edge_id, veh[0]) for edge_id in self.edge_ids
+        })
+
+        obs = self._get_obs(self._actionable_veh.veh_id)
         return obs, {}
 
     def _get_obs(self, veh_id: int) -> np.ndarray:
@@ -147,12 +151,12 @@ class RoadSimulationEnv(Env):
 
     def _get_reward(self):
         cur_fuel_cons = {
-            edge_id: self._get_fuel_consumption(edge_id, self.actionable_veh_id) for edge_id in self.edge_ids
+            edge_id: self._get_fuel_consumption(edge_id, self._actionable_veh.veh_id) for edge_id in self.edge_ids
         }
 
         delta = 0
         for edge_id in self.edge_ids:
-            prev, cur = self.fuel_cons_of_actionable_veh[edge_id], cur_fuel_cons[edge_id]
+            prev, cur = self._actionable_veh.fuel_cons[edge_id], cur_fuel_cons[edge_id]
 
             if cur > prev:
                 delta += cur - prev
@@ -184,11 +188,10 @@ class RoadSimulationEnv(Env):
             action = min(action, self.max_speed)
             action = max(action, self.min_speed)
             assert (
-                    traci.vehicle.getTypeID(self.actionable_veh_id) == "connected"
-            ), f"vehicle {self.actionable_veh_id} is not connected"
+                    traci.vehicle.getTypeID(self._actionable_veh.veh_id) == "connected"
+            ), f"vehicle {self._actionable_veh.veh_id} is not connected"
 
-            traci.vehicle.setSpeed(vehID=self.actionable_veh_id, speed=action / 3.6)
-
+            traci.vehicle.setSpeed(vehID=self._actionable_veh.veh_id, speed=action / 3.6)
 
     def _spawn_till_connected(self):
         while True:
@@ -221,9 +224,9 @@ class RoadSimulationEnv(Env):
         action = min(action, self.max_speed)
         action = max(action, self.min_speed)
         assert (
-                traci.vehicle.getTypeID(self.actionable_veh_id) == "connected"
-        ), f"vehicle {self.actionable_veh_id} is not connected"
-        traci.vehicle.setSpeed(vehID=self.actionable_veh_id, speed=action / 3.6)
+                traci.vehicle.getTypeID(self._actionable_veh.veh_id) == "connected"
+        ), f"vehicle {self._actionable_veh.veh_id} is not connected"
+        traci.vehicle.setSpeed(vehID=self._actionable_veh.veh_id, speed=action / 3.6)
 
         self._spawn_till_connected()
 
@@ -235,15 +238,18 @@ class RoadSimulationEnv(Env):
                 if traci.vehicle.getTypeID(vehicleID) == "connected":
                     connected_vehs.append((vehicleID, edge_id))
         veh = random.choice(connected_vehs)
-        self.actionable_veh_id = veh[0]
 
-        self.edge_id_of_actionable_veh = veh[1]
+        veh_id = veh[0]
 
-        self.fuel_cons_of_actionable_veh = {
-            edge_id: self._get_fuel_consumption(edge_id, self.actionable_veh_id) for edge_id in self.edge_ids
-        }
+        self._actionable_veh = ConnectedVehicle(
+            veh_id=veh_id,
+            edge_id=veh[1],
+            fuel_cons={
+                edge_id: self._get_fuel_consumption(edge_id, veh_id) for edge_id in self.edge_ids
+            },
+        )
 
-        obs = self._get_obs(self.actionable_veh_id)
+        obs = self._get_obs(self._actionable_veh.veh_id)
 
         assert obs.size != 0
 
