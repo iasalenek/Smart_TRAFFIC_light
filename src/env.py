@@ -1,7 +1,6 @@
 import numpy as np
-import matplotlib.pyplot as plt
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 import sumolib
 
 import random
@@ -11,14 +10,16 @@ from src.metrics import MeanEdgeFuelConsumption, MeanEdgeTime
 from src.metrics import EdgeMetric
 from gymnasium import Env, spaces
 
+# constants
 _INF_PROX = 2000
+
+# defaults
 CONFIG_PATH = "nets/single_agent/500m/config.sumocfg"
 SIM_TIME = 1 * 60 * 5
 P_VEHICLE = 0.3
 P_CONNECTED = 0.2
 MIN_SPEED = 15
 MAX_SPEED = 60
-
 STEP_LENGTH = 1
 EDGE_IDS = ["E1", "E0", "E2"]
 TRAFFIC_LIGTS = ["J1", "J2"]
@@ -68,12 +69,12 @@ class RoadSimulationEnv(Env):
         self.cur_step = 0
         self.p_vehicle = p_vehicle
         self.p_connected = p_connected
-        self._actionable_veh: ConnectedVehicle = None
+        self._actionable_vehicles: List[ConnectedVehicle] = []
         self._glosa_range = glosa_range
 
         self.action_space = spaces.Discrete(self.max_speed - self.min_speed)
 
-        self.output_shape = (2, 1)
+        self.output_shape = (5, 1)
         self.observation_space = spaces.Box(low=0, high=255, shape=self.output_shape, dtype=np.float64)
 
         sumo_binary = sumolib.checkBinary("sumo-gui") if use_gui else sumolib.checkBinary("sumo")
@@ -108,41 +109,75 @@ class RoadSimulationEnv(Env):
                 metric_listener: EdgeMetric
                 traci.addStepListener(metric_listener)
 
-    def reset(self):
+    def reset(self, seed=42):
+        observations, _ = self.reset_all(random_probabilities=True)
+        return observations[0], {}
+
+    def reset_all(self, random_probabilities=False):
         traci.close()
+
+        if random_probabilities:
+            self.p_vehicle = random.random()
+            self.p_connected = random.random()
+
         self.cur_step = 0
         self._traci_setup()
 
         self._spawn_till_connected()
 
-        connected_vehs = []
+        self._actionable_vehicles.clear()
         for edge_id in self.edge_ids:
             for vehicleID in traci.edge.getLastStepVehicleIDs(edge_id):
                 if traci.vehicle.getTypeID(vehicleID) == "connected":
-                    connected_vehs.append((vehicleID, edge_id))
+                    self._actionable_vehicles.append(ConnectedVehicle(vehicleID, edge_id, {
+                        edge_id: self._get_fuel_consumption(edge_id, vehicleID) for edge_id in self.edge_ids
+                    }))
 
-        if len(connected_vehs) == 0:
-            print("No connected vehicles found")
-            return None
+        assert len(self._actionable_vehicles) != 0
 
-        veh = random.choice(connected_vehs)
-        self._actionable_veh = ConnectedVehicle(veh[0], veh[1], {
-            edge_id: self._get_fuel_consumption(edge_id, veh[0]) for edge_id in self.edge_ids
-        })
+        random.shuffle(self._actionable_vehicles)
 
-        obs = self._get_obs(self._actionable_veh.veh_id)
+        obs = self._get_obs_all()
         return obs, {}
 
-    def _get_obs(self, veh_id: int) -> np.ndarray:
-        car_pos = traci.vehicle.getPosition(veh_id)[0]
-        closest_red_light_tf = _INF_PROX
-        time_to_next_switch = 0
-        for tf_id in self.trafficlight_ids:
-            tf_pos = self.net.getNode(tf_id).getCoord()[0]
-            if tf_pos >= car_pos and traci.trafficlight.getPhase(tf_id) == 0:
-                time_to_next_switch = traci.trafficlight.getNextSwitch(tf_id) - traci.simulation.getTime()
-                closest_red_light_tf = min(closest_red_light_tf, tf_pos - car_pos)
-        return np.array([time_to_next_switch, closest_red_light_tf])
+    def _get_obs_all(self) -> List[np.ndarray]:
+        edge_ids: Set[str] = {veh.edge_id for veh in self._actionable_vehicles}
+
+        lane_positions = {
+            edge_id: {
+                veh_id: traci.vehicle.getLanePosition(veh_id) for veh_id in traci.edge.getLastStepVehicleIDs(edge_id)
+            } for edge_id in edge_ids
+        }
+
+        res = []
+        for veh in self._actionable_vehicles:
+            car_pos = traci.vehicle.getPosition(veh.veh_id)[0]
+            closest_red_light_tf = _INF_PROX
+            time_to_next_switch = 0
+            for tf_id in self.trafficlight_ids:
+                tf_pos = self.net.getNode(tf_id).getCoord()[0]
+                if tf_pos >= car_pos and traci.trafficlight.getPhase(tf_id) == 0:
+                    time_to_next_switch = traci.trafficlight.getNextSwitch(tf_id) - traci.simulation.getTime()
+                    closest_red_light_tf = min(closest_red_light_tf, tf_pos - car_pos)
+
+            acceleration = traci.vehicle.getAcceleration(veh.veh_id)
+
+            vehicles_on_the_edge = traci.edge.getLastStepVehicleIDs(veh.edge_id)
+            edge_vehicle_count = len(vehicles_on_the_edge)
+
+            lane_pos: float = lane_positions[veh.edge_id][veh.veh_id]
+            dist_to_next = _INF_PROX
+            for other_veh_id, other_lane_pos in lane_positions[veh.edge_id].items():
+                if veh.veh_id == other_veh_id or lane_pos >= other_lane_pos:
+                    continue
+
+                dist_to_next = min(dist_to_next, other_lane_pos - lane_pos)
+
+            res.append(
+                np.array(
+                    [time_to_next_switch, closest_red_light_tf, acceleration, edge_vehicle_count, dist_to_next],
+                ).reshape((5, 1)))
+        return res
 
     def _get_fuel_consumption(self, edge_id: str, veh_id: int):
         if veh_id in self.metrics_listeners[edge_id]['fuel']._vehicleIdFuelDict:
@@ -150,20 +185,28 @@ class RoadSimulationEnv(Env):
         return 0
 
     def _get_reward(self):
-        cur_fuel_cons = {
-            edge_id: self._get_fuel_consumption(edge_id, self._actionable_veh.veh_id) for edge_id in self.edge_ids
-        }
+        return self._get_reward_all()[0]
 
-        delta = 0
-        for edge_id in self.edge_ids:
-            prev, cur = self._actionable_veh.fuel_cons[edge_id], cur_fuel_cons[edge_id]
+    def _get_reward_all(self) -> List[float]:
+        deltas: List[float] = []
+        for veh in self._actionable_vehicles:
+            cur_fuel_cons = {
+                edge_id: self._get_fuel_consumption(edge_id, veh.veh_id) for edge_id in
+                self.edge_ids
+            }
 
-            if cur > prev:
-                delta += cur - prev
+            delta = 0
+            for edge_id in self.edge_ids:
+                prev, cur = veh.fuel_cons[edge_id], cur_fuel_cons[edge_id]
 
-        assert delta >= 0
+                if cur > prev:
+                    delta += cur - prev
 
-        return -delta
+            assert delta >= 0
+
+            deltas.append(-delta)
+
+        return deltas
 
     def get_total_fuel(self):
         fuel_cons = {
@@ -182,16 +225,22 @@ class RoadSimulationEnv(Env):
         fuel_cons["All"] /= len(self.edge_ids)
         return fuel_cons
 
-    def step_all(self, actions: List[int]):
-        for action in actions:
-            action += self.min_speed
-            action = min(action, self.max_speed)
-            action = max(action, self.min_speed)
-            assert (
-                    traci.vehicle.getTypeID(self._actionable_veh.veh_id) == "connected"
-            ), f"vehicle {self._actionable_veh.veh_id} is not connected"
+    def get_total_time(self):
+        time_cons = {
+            "connected": 0,
+            "ordinary": 0,
+            "All": 0,
+        }
+        for edge_id in self.edge_ids:
+            cur = self.metrics_listeners[edge_id]["time"].get_mean_time()
+            time_cons["connected"] += cur["connected"]
+            time_cons["ordinary"] += cur["ordinary"]
+            time_cons["All"] += cur["All"]
 
-            traci.vehicle.setSpeed(vehID=self._actionable_veh.veh_id, speed=action / 3.6)
+        time_cons["connected"] /= len(self.edge_ids)
+        time_cons["ordinary"] /= len(self.edge_ids)
+        time_cons["All"] /= len(self.edge_ids)
+        return time_cons
 
     def _spawn_till_connected(self):
         while True:
@@ -220,45 +269,46 @@ class RoadSimulationEnv(Env):
                 return
 
     def step(self, action: int):
-        action += self.min_speed
-        action = min(action, self.max_speed)
-        action = max(action, self.min_speed)
-        assert (
-                traci.vehicle.getTypeID(self._actionable_veh.veh_id) == "connected"
-        ), f"vehicle {self._actionable_veh.veh_id} is not connected"
-        traci.vehicle.setSpeed(vehID=self._actionable_veh.veh_id, speed=action / 3.6)
+        observations, rewards, terminated, truncated, _ = self.step_all([action])
+        return observations[0], rewards[0], terminated, truncated, {}
+
+    def step_all(self, actions: List[np.ndarray]):
+        for i, action in enumerate(actions):
+            if not action:
+                continue
+            action += self.min_speed
+            action = min(action, self.max_speed)
+            action = max(action, self.min_speed)
+            assert (
+                    traci.vehicle.getTypeID(self._actionable_vehicles[i].veh_id) == "connected"
+            ), f"vehicle {self._actionable_vehicles[i].veh_id} is not connected"
+            assert action <= MAX_SPEED
+            traci.vehicle.setSpeed(vehID=self._actionable_vehicles[i].veh_id, speed=action / 3.6)
 
         self._spawn_till_connected()
 
-        reward = self._get_reward()
+        rewards = self._get_reward_all()
 
-        connected_vehs = []
+        self._actionable_vehicles.clear()
         for edge_id in self.edge_ids:
             for vehicleID in traci.edge.getLastStepVehicleIDs(edge_id):
                 if traci.vehicle.getTypeID(vehicleID) == "connected":
-                    connected_vehs.append((vehicleID, edge_id))
-        veh = random.choice(connected_vehs)
+                    self._actionable_vehicles.append(ConnectedVehicle(vehicleID, edge_id, {
+                        edge_id: self._get_fuel_consumption(edge_id, vehicleID) for edge_id in self.edge_ids
+                    }))
 
-        veh_id = veh[0]
+        random.shuffle(self._actionable_vehicles)
 
-        self._actionable_veh = ConnectedVehicle(
-            veh_id=veh_id,
-            edge_id=veh[1],
-            fuel_cons={
-                edge_id: self._get_fuel_consumption(edge_id, veh_id) for edge_id in self.edge_ids
-            },
-        )
+        observations = self._get_obs_all()
 
-        obs = self._get_obs(self._actionable_veh.veh_id)
-
-        assert obs.size != 0
+        assert len(observations) != 0
 
         terminated = self.cur_step + 1 > (self.sim_time // self.step_length)
         truncated = False
 
         self.cur_step += 1
 
-        return obs, reward, terminated, truncated, {}
+        return observations, rewards, terminated, truncated, {}
 
     def close(self):
         traci.close()

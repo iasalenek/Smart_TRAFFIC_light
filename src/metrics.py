@@ -58,6 +58,10 @@ class MeanEdgeTime(EdgeMetric):
         self._vehicleIdTypeDict = dict()
         traci.edge.subscribe(self.edgeID, varIDs=[tc.LAST_STEP_VEHICLE_ID_LIST])
 
+    def get_mean_time(self):
+        self.cleanUp()
+        return self.aggregatedValues
+
     def step(self, t=0):
         time = traci.simulation.getTime()
         # Множества всех машин на ребре и машин которые въехали/выехали с ребра на этом шаге
